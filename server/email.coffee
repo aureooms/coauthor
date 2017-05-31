@@ -2,7 +2,7 @@ unless process.env['MAIL_URL']?
   console.warn "MAIL_URL not sent -- email notifications won't work!"
 
 Accounts.emailTemplates.siteName = 'Coauthor'
-Accounts.emailTemplates.from = 'coauthor@coauthor.csail.mit.edu'
+Accounts.emailTemplates.from = 'coauthor@ulb.ac.be'
 Accounts.emailTemplates.verifyEmail.subject = (user) ->
   "Email confirmation for Coauthor"
 Accounts.emailTemplates.verifyEmail.text = (user, link) -> """
@@ -24,7 +24,7 @@ Accounts.config
   sendVerificationEmail: true
 
 #Email.send
-#  from: 'coauthor@coauthor.csail.mit.edu'
+#  from: 'coauthor@ulb.ac.be'
 #  to: 'edemaine@mit.edu'
 #  subject: 'Testing...'
 #  html: '<p>Welcome to Coauthor!</p>We hope you like your stay :)'
