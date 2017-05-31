@@ -1,42 +1,34 @@
 module.exports = {
   servers: {
     one: {
-      host: 'coauthor.csail.mit.edu',
-      username: 'ubuntu',
-      pem: "/afs/csail/u/e/edemaine/.ssh/private/id_dsa"
-      // pem:
-      // password:
-      // or leave blank for authenticate from ssh-agent
+      host: 'coauthor.ulb.ac.be',
+      username: 'meteorapp'
     }
   },
 
   meteor: {
     name: 'coauthor',
-    path: '/afs/csail/u/e/edemaine/Projects/coauthor',
+    path: '..',
     servers: {
       one: {}
     },
-    dockerImage: 'abernix/meteord:base', 
     docker: {
-      image: 'abernix/meteord:base', 
+      image: 'abernix/meteord:base' ,
+      imagePort: 3001
     },
     buildOptions: {
       serverOnly: true,
-      buildLocation: '/scratch/coauthor-build'
+      buildLocation: '/tmp/coauthor-build'
     },
     env: {
-      ROOT_URL: 'https://coauthor.csail.mit.edu',
-      PORT: 80,
-      MAIL_URL: 'smtp://coauthor.csail.mit.edu:25',
+      ROOT_URL: 'https://coauthor.ulb.ac.be',
+      PORT: 3001,
+      MAIL_URL: 'smtp://smtp.ulb.ac.be:587',
       MONGO_URL: 'mongodb://localhost/meteor'
     },
-    ssl: {
-      // pem: '../coauthor_csail_mit_edu.ssl/coauthor_csail_mit_edu.pem'
-      crt: '../coauthor_csail_mit_edu.ssl/coauthor_csail_mit_edu.pem',
-      key: '../coauthor_csail_mit_edu.ssl/coauthor_csail_mit_edu.key',
-      port: 443
-    },
-    deployCheckWaitTime: 150
+    deployCheckWaitTime: 150,
+    deployCheckPort: 80,
+    enableUploadProgressBar: true
   },
 
   mongo: {
