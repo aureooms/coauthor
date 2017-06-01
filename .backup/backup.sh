@@ -2,12 +2,15 @@
 
 set -o xtrace
 
-cd "$(dirname "$0")"
-ssh meteorapp@coauthor.ulb.ac.be mongodump --db coauthor
-rsync -a meteorapp@coauthor.ulb.ac.be:dump/coauthor/ coauthor-backup/
+SERVER='meteorapp@coauthor.ulb.ac.be'
+CLOUD='db' # dropbox
 
-if rc copy coauthor-backup db:coauthor-backup/"$(date '+%Y-%m-%d_%H:%M:%S')"
-then
+cd "$(dirname "$0")"
+ssh "$SERVER" mongodump --db coauthor || exit 1
+rsync -a "$SERVER":dump/coauthor/ coauthor-backup/ || exit 1
+rc copy coauthor-backup "$CLOUD":coauthor-backup/"$(date '+%Y-%m-%d_%H:%M:%S')"
+
+if [ "$?" -eq 0 ] ; then
   echo 'SUCCESS!!'
 else
   echo 'FAILURE...'
