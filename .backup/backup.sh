@@ -1,41 +1,14 @@
-#!/bin/sh
-cd "`dirname "$0"`"
-ssh ubuntu@coauthor mongodump --db coauthor
-rsync -a ubuntu@coauthor:dump/coauthor/ coauthor-backup/
+#!/usr/bin/env sh
 
-#method=acd_cli
-method=rclone
+set -o xtrace
 
-case $method in
+cd "$(dirname "$0")"
+ssh meteorapp@coauthor.ulb.ac.be mongodump --db coauthor
+rsync -a meteorapp@coauthor.ulb.ac.be:dump/coauthor/ coauthor-backup/
 
-rclone)
-  if rclone copy coauthor-backup amazon:coauthor-backup/`date +%Y-%m-%d`
-  then
-    echo SUCCESS\!\!
-  else
-    echo FAILURE...
-  fi
-  ;;
-
-acd_cli)
-  count=0
-  limit=20
-  acd_cli sync
-  acd_cli mkdir /coauthor-backup/`date +%Y-%m-%d`
-  while ! acd_cli ul -q -o coauthor-backup/* /coauthor-backup/`date +%Y-%m-%d`
-  do
-    echo Trying again... $count
-    acd_cli sync
-    count=`expr $count + 1`
-    if [ $count -gt $limit ]
-    then
-      break
-    fi
-  done
-  if [ $count -le $limit ]
-  then
-    echo SUCCESS\!\!
-  fi
-  ;;
-
-esac
+if rc copy coauthor-backup db:coauthor-backup/"$(date '+%Y-%m-%d_%H:%M:%S')"
+then
+  echo 'SUCCESS!!'
+else
+  echo 'FAILURE...'
+fi
