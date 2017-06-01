@@ -32,7 +32,6 @@ edemaine:bootstrap-slider@1.0.1
 ejson@1.0.13
 email@1.1.18
 fastclick@1.0.13
-force-ssl@1.0.13
 gcampax:accounts-dropbox@1.0.0
 gcampax:dropbox-oauth@1.0.0
 geojson-utils@1.0.10

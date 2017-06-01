@@ -8,25 +8,22 @@ module.exports = {
 
   meteor: {
     name: 'coauthor',
-    path: '..',
+    path: '.',
     servers: {
       one: {}
     },
     docker: {
-      image: 'abernix/meteord:base' ,
-      imagePort: 3001
+      image: 'abernix/meteord:base'
     },
     buildOptions: {
-      serverOnly: true,
-      buildLocation: '/tmp/coauthor-build'
+      serverOnly: true
     },
     env: {
       ROOT_URL: 'https://coauthor.ulb.ac.be',
       PORT: 3001,
-      MAIL_URL: 'smtp://smtp.ulb.ac.be:587',
-      MONGO_URL: 'mongodb://localhost/meteor'
+      MAIL_URL: 'smtp://smtp.ulb.ac.be:587'
     },
-    deployCheckWaitTime: 150,
+    deployCheckWaitTime: 30,
     deployCheckPort: 80,
     enableUploadProgressBar: true
   },
