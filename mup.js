@@ -21,7 +21,7 @@ module.exports = {
     env: {
       ROOT_URL: 'https://coauthor.ulb.ac.be',
       PORT: 3001,
-      MAIL_URL: 'smtp://smtp.ulb.ac.be:587'
+      MAIL_URL: 'smtp://smtp.ulb.ac.be:25'
     },
     deployCheckWaitTime: 30,
     deployCheckPort: 80,
