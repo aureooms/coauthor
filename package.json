@@ -21,18 +21,18 @@
   },
   "homepage": "https://github.com/edemaine/coauthor",
   "dependencies": {
-    "babel-runtime": "^6.22.0",
-    "bcrypt": "^0.8.7",
-    "chart.js": "^2.5.0",
-    "codemirror": "^5.25.0",
+    "babel-runtime": "^6.26.0",
+    "bcrypt": "^1.0.3",
+    "chart.js": "^2.7.1",
+    "codemirror": "5.26.0",
     "codemirror-spell-checker": "^1.1.2",
     "cookie": "^0.3.1",
-    "diff": "^3.2.0",
-    "katex": "^0.7.0",
-    "markdown-it": "^8.3.1",
+    "diff": "^3.4.0",
+    "katex": "^0.9.0",
+    "markdown-it": "^8.4.0",
     "markdown-it-replacements": "^1.0.1",
-    "meteor-node-stubs": "^0.2.5",
-    "sanitize-html": "^1.14.1"
+    "meteor-node-stubs": "^0.2.11",
+    "sanitize-html": "^1.16.1"
   },
   "devDependencies": {
     "grunt": "^1.0.1",
