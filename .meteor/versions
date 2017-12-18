@@ -62,17 +62,10 @@ iron:url@1.1.0
 jquery@1.11.10
 launch-screen@1.1.1
 livedata@1.0.18
-<<<<<<< HEAD
-localstorage@1.0.12
-logging@1.1.17
-meteor@1.6.1
-meteor-base@1.0.4
-=======
 localstorage@1.2.0
 logging@1.1.19
 meteor@1.8.0
 meteor-base@1.2.0
->>>>>>> upstream/master
 meteorhacks:kadira@2.30.4
 meteorhacks:meteorx@1.4.1
 meteorhacks:subs-manager@1.6.4
