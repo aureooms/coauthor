@@ -1,4 +1,10 @@
-@Files = FileCollection
+corsHandler = (req, res, next) ->
+  if req.headers?.origin
+    res.setHeader 'Access-Control-Allow-Origin', req.headers.origin
+    res.setHeader 'Access-Control-Allow-Credentials', true
+  next()
+
+@Files = new FileCollection
   resumable: true
   resumableIndexName: 'files'
   http: [
@@ -6,6 +12,29 @@
     path: '/id/:_id'
     lookup: (params, query) ->
       _id: params._id
+  #  handler: corsHandler
+  #,
+  #  method: 'post'
+  #  path: '/_resumable'
+  #  lookup: -> {}   ## INCORRECT
+  #  handler: corsHandler
+  #,
+  #  method: 'head'
+  #  path: '/_resumable'
+  #  lookup: -> {}
+  #  handler: corsHandler
+  #,
+  #  method: 'options'
+  #  path: '/_resumable'
+  #  lookup: -> {}
+  #  handler: (req, res, next) ->
+  #    res.writeHead 200,
+  #      'Content-Type': 'text/plain'
+  #      'Access-Control-Allow-Origin': req.headers.origin
+  #      'Access-Control-Allow-Credentials': true
+  #      'Access-Control-Allow-Headers': 'x-auth-token, user-agent'
+  #      'Access-Control-Allow-Methods': 'GET, POST, HEAD, OPTIONS'
+  #    res.end()
   ]
 
 if Meteor.isServer
@@ -14,7 +43,7 @@ if Meteor.isServer
     ['metadata._Resumable', 1]
   ]
 
-fileUrlPrefix = "/file/"
+@fileUrlPrefix = "/file/"
 
 ## If given object has a `file` but no `_id` field, then we make a link
 ## to the internal file object instead of the file associated with a message.
@@ -24,26 +53,35 @@ fileUrlPrefix = "/file/"
   if id.file?
     urlToInternalFile id
   else
-    "#{fileUrlPrefix}#{id}"
+    Meteor.absoluteUrl "#{fileUrlPrefix[1..]}#{id}"
 
 @url2file = (url) ->
   if url[...fileUrlPrefix.length] == fileUrlPrefix
     url[fileUrlPrefix.length..]
   else
-    throw new Meteor.Error 'url2file.invalid',
-      "Bad file URL #{url}"
+    absolutePrefix = Meteor.absoluteUrl fileUrlPrefix[1..]
+    if url[...absolutePrefix.length] == absolutePrefix
+      url[absolutePrefix.length..]
+    else
+      throw new Meteor.Error 'url2file.invalid',
+        "Bad file URL #{url}"
 
-internalFileUrlPrefix = "#{Files.baseURL}/id/"
+@internalFileUrlPrefix = "#{Files.baseURL}/id/"
+
 @urlToInternalFile = (id) ->
   id = id.file if id.file?
-  "#{internalFileUrlPrefix}#{id}"
+  Meteor.absoluteUrl "#{internalFileUrlPrefix[1..]}#{id}"
 
 @url2internalFile = (url) ->
   if url[...internalFileUrlPrefix.length] == internalFileUrlPrefix
     url[internalFileUrlPrefix.length..]
   else
-    throw new Meteor.Error 'url2internalFile.invalid',
-      "Bad file URL #{url}"
+    absolutePrefix = Meteor.absoluteUrl internalFileUrlPrefix[1..]
+    if url[...absolutePrefix.length] == absolutePrefix
+      url[absolutePrefix.length..]
+    else
+      throw new Meteor.Error 'url2internalFile.invalid',
+        "Bad file URL #{url}"
 
 @findFile = (id) ->
   Files.findOne new Meteor.Collection.ObjectID id
@@ -83,7 +121,7 @@ if Meteor.isServer
       check file.metadata,
         group: Match.Optional String
       file.metadata.uploader = userId
-      groupRoleCheck file.metadata.group ? wildGroup, 'post'
+      groupRoleCheck file.metadata.group ? wildGroup, 'post', findUser userId
     remove: (userId, file) ->
       file.metadata?.uploader in [userId, null]
     read: (userId, file) ->
@@ -93,8 +131,13 @@ if Meteor.isServer
       file.metadata?.uploader in [userId, null]
 else
   Tracker.autorun ->
-    $.cookie 'X-Auth-Token', Accounts._storedLoginToken(),
-      path: '/'
+    Meteor.userId()  ## rerun when userId changes
+    if Meteor.isCordova
+      window.cookieEmperor.setCookie Meteor.absoluteUrl(),
+        'X-Auth-Token', Accounts._storedLoginToken()
+    else
+      $.cookie 'X-Auth-Token', Accounts._storedLoginToken(),
+        path: '/'
 
   Session.set 'uploading', {}
   updateUploading = (changer) =>

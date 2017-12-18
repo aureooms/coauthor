@@ -1,3 +1,11 @@
+###
+IronRouter routes
+
+When adding a new route here, consider adding it to the `linkToRoutes`
+in ../client/layout.coffee, so that changing the group will preserve
+the details of the route.
+###
+
 #@Subscribe = Meteor
 @Subscribe = new SubsManager
 
@@ -87,7 +95,7 @@ Router.route '/:group/since/:since?',
     since: @params.since ? defaultSince
   fastRender: true
 
-defaultLiveLimit = 50
+defaultLiveLimit = 10
 
 Router.route '/:group/live/:limit?',
   name: 'live'
@@ -113,17 +121,17 @@ Router.route '/:group/author/:author',
     author: @params.author
   fastRender: true
 
-Router.route '/:group/tag/:tag',
-  name: 'tag'
-  subscriptions: -> [
-    Subscribe.subscribe 'messages.tag', @params.group, @params.tag
-    Subscribe.subscribe 'groups.members', @params.group
-    Subscribe.subscribe 'files', @params.group
-  ]
-  data: ->
-    group: @params.group
-    tag: @params.tag
-  fastRender: true
+#Router.route '/:group/tag/:tag',
+#  name: 'tag'
+#  subscriptions: -> [
+#    Subscribe.subscribe 'messages.tag', @params.group, @params.tag
+#    Subscribe.subscribe 'groups.members', @params.group
+#    Subscribe.subscribe 'files', @params.group
+#  ]
+#  data: ->
+#    group: @params.group
+#    tag: @params.tag
+#  fastRender: true
 
 Router.route '/:group/stats/:username?',
   name: 'stats'
@@ -139,7 +147,20 @@ Router.route '/:group/stats/:username?',
     unit: @params.query.unit
   fastRender: true
 
-@wildGroupRoute = 'GLOBAL'
+## GLOBAL used to be in some URLs rather than *, but don't see why.
+@wildGroupRoute = wildGroup #'GLOBAL'
+
+Router.route '/:group/search/:search',
+  name: 'search'
+  subscriptions: -> [
+    Subscribe.subscribe 'messages.search', @params.group, @params.search
+    Subscribe.subscribe 'groups.members', @params.group
+    Subscribe.subscribe 'files', @params.group
+  ]
+  data: ->
+    group: @params.group
+    search: @params.search
+  fastRender: true
 
 Router.route '/:group/users',
   name: 'users'

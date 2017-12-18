@@ -2,11 +2,11 @@ module.exports = (grunt) ->
   grunt.initConfig
     pkg: grunt.file.readJSON 'package.json'
     copy:
-      fonts:
+      katex_fonts:
         expand: true
         cwd: 'node_modules/katex/dist/fonts/'
         src: '**'
-        dest: 'public/fonts/'
+        dest: 'public/katex/fonts/'
       codemirror:
         expand: true
         flatten: true
@@ -22,7 +22,7 @@ module.exports = (grunt) ->
         options:
           patterns: [
             match: /url\(fonts/g
-            replacement: 'url(/fonts'
+            replacement: 'url(/katex/fonts'
           ]
         files: [
           expand: true
@@ -34,15 +34,18 @@ module.exports = (grunt) ->
         options:
           patterns: [
             match: /require\(".\/codemirror"\)/
-            replacement: 'require("meteor/mizzao:sharejs-codemirror/node_modules/codemirror/lib/codemirror.js")'
+            replacement: 'require("meteor/edemaine:sharejs-codemirror/node_modules/codemirror/lib/codemirror.js")'
           ,
             match: /require\("[^"]*\//g
             replacement: 'require("./'
           #  match: /\(function[^]*?function\(CodeMirror\) {/
-          #  replacement: 'const CodeMirror = require("meteor/mizzao:sharejs-codemirror/node_modules/codemirror/lib/codemirror.js");'
+          #  replacement: 'const CodeMirror = require("meteor/edemaine:sharejs-codemirror/node_modules/codemirror/lib/codemirror.js");'
           #,
           #  match: /}\);\s*$/
           #  replacement: ''
+          ,
+            match: /\|coap\|/
+            replacement: '|coap|coauthor|'
           ]
         files: [
           expand: true
@@ -76,3 +79,17 @@ module.exports = (grunt) ->
     'copy'
     'replace'
   ]
+
+  ## Convert timezones into autocompletion list
+  fs = require 'fs'
+  meta = JSON.parse fs.readFileSync 'node_modules/moment-timezone/data/meta/latest.json', encoding: 'utf8'
+  zones = JSON.parse fs.readFileSync 'node_modules/moment-timezone/data/unpacked/latest.json', encoding: 'utf8'
+  timezones =
+    for zone in zones.zones
+      name = zone.name
+      if name of meta.zones
+        countries = meta.zones[name].countries
+        countries = (meta.countries[country].name for country in countries)
+        name += " (#{countries.join ', '})"
+      name
+  fs.writeFileSync 'public/timezones.json', JSON.stringify timezones

@@ -40,25 +40,50 @@ switch sharejsEditor
 #Template.registerHelper 'titleOrUntitled', ->
 #  titleOrUntitled @
 
-Template.registerHelper 'children', ->
-  return @children unless @children
-  children = Messages.find _id: $in: @children
-               .fetch()
-  children = _.sortBy children, (child) => @children.indexOf child._id
-  for child, index in children
-    ## Use canSee to properly fake non-superuser mode.
-    continue unless canSee child
-    child.depth = (@depth ? 0) + 1
-    child.index = index
-    child
+Template.registerHelper 'childrenCount', ->
+  return 0 unless @children and @children.length > 0
+  msgs = Messages.find
+    _id: $in: @children
+  .fetch()
+  msgs = (msg for msg in msgs when canSee msg)
+  msgs.length
+
+Template.registerHelper 'childLookup', (index) ->
+  ## Usage:
+  ##   each children
+  ##     with childLookup @index
+  ## Assumes `this` is a String object whose value is a message ID,
+  ## and the argument is the index of interation.  Fetches the message,
+  ## and populates it with additional `index` and `parent` fields.
+  ## In this careful usage, we don't spill reactive dependencies
+  ## between parents and children.
+  #console.log 'looking up', @valueOf()
+  msg = Messages.findOne @valueOf()
+  return msg unless msg
+  ## Use canSee to properly fake non-superuser mode.
+  return unless canSee msg
+  ## Import _id information from parent nonreactively.
+  ## If we get reparented, a totally new template should get created,
+  ## so we don't need to be reactive to changes to parentData.
+  parentData = Tracker.nonreactive -> Template.parentData()
+  msg.parent = parentData._id
+  #msg.depth = parentData.depth
+  msg.index = index
+  msg
 
 Template.registerHelper 'tags', ->
   sortTags @tags
 
 Template.registerHelper 'linkToTag', ->
-  pathFor 'tag',
+  #pathFor 'tag',
+  #  group: Template.parentData().group
+  #  tag: @key
+  pathFor 'search',
     group: Template.parentData().group
-    tag: @key
+    search: "tag:#{@key}"
+
+Template.registerHelper 'folded', ->
+  (not here @_id) and messageFolded.get @_id
 
 Template.rootHeader.helpers
   root: ->
@@ -93,7 +118,22 @@ orphans = (message) ->
     root: message
     _id: $nin: descendants
 
+authorCountHelper = (field) -> ->
+  authors =
+    for username, count of Session.get field
+      continue unless count
+      user: findUsername(username) ? username: username
+      count: count
+  authors = _.sortBy authors, (author) -> userSortKey author.user
+  authors = _.sortBy authors, (author) -> -author.count
+  authors =
+    for author in authors
+      "#{linkToAuthor @group, author.user} (#{author.count})"
+  authors.join ', '
+
 Template.message.helpers
+  authors: authorCountHelper 'threadAuthors'
+  mentions: authorCountHelper 'threadMentions'
   subscribers: ->
     users =
       for user in sortedMessageSubscribers @_id
@@ -162,39 +202,96 @@ editing = (self) ->
 
 idle = 1000   ## one second
 
-Template.registerHelper 'deletedClass', ->
+messageClass = ->
   if @deleted
     'deleted'
   else if not @published
     'unpublished'
   else if @private
     'private'
+  else if @minimized
+    'minimized'
   else
     'published'
+
+Template.registerHelper 'messageClass', messageClass
 
 submessageCount = 0
 
 messageRaw = new ReactiveDict
-messageFolded = new ReactiveDict
+export messageFolded = new ReactiveDict
 messageHistory = new ReactiveDict
 messageKeyboard = new ReactiveDict
+messagePreview = new ReactiveDict
+@messagePreviewDefault = ->
+  profile = Meteor.user().profile?.preview
+  on: profile?.on ? true
+  sideBySide: profile?.sideBySide ? false
+## The following helpers should only be called when editing.
+## They can be called in two settings:
+##   * Within the submessage template, and possibly within a `with nothing`
+##     data environment.  In this case, we use the `editing` ReactiveVar
+##     to get the message ID, because we should be editing.
+##   * From the betweenEditorAndBody subtemplate.  Then we can use `_id` data.
+messagePreviewGet = ->
+  if Template.instance().editing?
+    id = Template.instance().editing.get()
+  else
+    id = Template.currentData()._id
+  return unless id
+  messagePreview.get(id) ? messagePreviewDefault()
+messagePreviewSet = (change) ->
+  if Template.instance().editing?
+    id = Template.instance().editing.get()
+  else
+    id = Template.currentData()._id
+  return unless id
+  preview = messagePreview.get(id) ? messagePreviewDefault()
+  messagePreview.set id, change preview
+
+export messageFoldHandler = (e, t) ->
+  e.preventDefault()
+  e.stopPropagation()
+  messageFolded.set @_id, not messageFolded.get @_id
+
+threadAuthors = {}
+threadMentions = {}
 
 Template.submessage.onCreated ->
   @count = submessageCount++
   @editing = new ReactiveVar null
+  @editTitle = new ReactiveVar null
+  @editBody = new ReactiveVar null
   @autorun =>
-    #console.log 'editing autorun', Template.currentData()?._id, editing Template.currentData()
-    return unless Template.currentData()?
-    #@myid = Template.currentData()._id
-    if editing Template.currentData()
-      @editing.set Template.currentData()._id
+    data = Template.currentData()
+    return unless data?
+    #@myid = data._id
+    if editing data
+      @editing.set data._id
+      @editTitle.set data.title
+      @editBody.set data.body
     else
       @editing.set null
+
+    threadAuthors[author] -= 1 for author in @authors if @authors?
+    threadMentions[author] -= 1 for author in @mentions if @mentions?
+    @authors = (unescapeUser author for author of data.authors)
+    for author in @authors
+      threadAuthors[author] ?= 0
+      threadAuthors[author] += 1
+    Session.set 'threadAuthors', threadAuthors
+    @mentions = atMentions data
+    for author in @mentions
+      threadMentions[author] ?= 0
+      threadMentions[author] += 1
+    Session.set 'threadMentions', threadMentions
+
     #console.log 'automathjax'
     automathjax()
 
 #Session.setDefault 'images', {}
 images = {}
+imagesInternal = {}
 id2template = {}
 scrollToLater = null
 fileQuery = null
@@ -208,10 +305,13 @@ updateFileQuery = ->
   .observeChanges
     added: (id, fields) ->
       images[id].file = fields.file
+      initImageInternal images[id].file, id if images[id].file?
     changed: (id, fields) ->
       if fields.file? and images[id].file != fields.file
         forceImgReload urlToFile id
+        imagesInternal[images[id].file].image = null if images[id].file?
         images[id].file = fields.file
+        initImageInternal images[id].file, id if images[id].file?
 
 initImage = (id) ->
   if id not of images
@@ -220,15 +320,30 @@ initImage = (id) ->
       file: null
     updateFileQuery()
 
+initImageInternal = (id, image = null) ->
+  if id not of imagesInternal
+    imagesInternal[id] =
+      count: 0
+      image: image
+  else if image?
+    imagesInternal[id].image = image
+
 checkImage = (id) ->
   return unless id of images
-  ## Image gets folded if it's referenced at least once.
-  messageFolded.set id, (images[id].count > 0)
+  ## Image gets unnaturally folded if it's referenced at least once.
+  messageFolded.set id, images[id].naturallyFolded or
+    images[id].count > 0 or
+    (imagesInternal[images[id].file]? and
+     imagesInternal[images[id].file].count > 0)
   ## No longer care about this image if it's not referenced and doesn't have
   ## a rendered template.
   if images[id].count == 0 and id not of id2template
     delete images[id]
     updateFileQuery()
+
+checkImageInternal = (id) ->
+  image = imagesInternal[id].image
+  checkImage image if image?
 
 messageDrag = (target, bodyToo = true) ->
   return unless target
@@ -253,6 +368,11 @@ messageDrag = (target, bodyToo = true) ->
         elt.addEventListener 'dragstart', onDragStart
   target.addEventListener 'dragstart', onDragStart
 
+## A message is "naturally" folded if it is flagged as minimized or deleted.
+## It still will be default-folded if it's an image referenced in another
+## message that is not naturally folded.
+export naturallyFolded = (data) -> data.minimized or data.deleted
+
 Template.submessage.onRendered ->
   ## Random message background color (to show nesting).
   #@firstNode.style.backgroundColor = '#' +
@@ -264,32 +384,52 @@ Template.submessage.onRendered ->
   focusButton = $(@find '.message-left-buttons').find('.focusButton')[0]
   messageDrag.call @, focusButton
 
-  ## Fold deleted messages by default on initial load.
-  messageFolded.set @data._id, true if @data.deleted
+  ## Fold naturally folded (minimized and deleted) messages
+  ## by default on initial load.
+  messageFolded.set @data._id, true if natural = naturallyFolded @data
 
   ## Fold referenced attached files by default on initial load.
   #@$.children('.panel').children('.panel-body').find('a[href|="/file/"]')
   #console.log @$ 'a[href|="/file/"]'
-  id2template[@data._id] = @
   scrollToMessage @data._id if scrollToLater == @data._id
   #images = Session.get 'images'
   @images = {}
-  initImage @data._id
-  images[@data._id].file = @data.file
+  @imagesInternal = {}
   @autorun =>
     data = Template.currentData()
-    ## If message is deleted, don't count images it references.
-    if data.deleted
+    return unless data._id
+    initImage data._id
+    ## initImage calls updateFileQuery which will do this:
+    #images[data._id].file = data.file
+    #initImageInternal data.file if data.file?
+    id2template[data._id] = @
+    ## If message is naturally folded, don't count images it references.
+    images[data._id].naturallyFolded = naturallyFolded data
+    if images[data._id].naturallyFolded
       for id of @images
         images[id].count -= 1
         checkImage id
       @images = {}
+      for id of @imagesInternal
+        imagesInternal[id].count -= 1
+        checkImageInternal id
+      @imagesInternal = {}
     else
       newImages = {}
+      newImagesInternal = {}
       $($.parseHTML("<div>#{formatBody data.format, data.body}</div>"))
-      .find 'img[src^="/file/"]'
+      .find """
+        img[src^="#{fileUrlPrefix}"],
+        img[src^="#{Meteor.absoluteUrl fileUrlPrefix[1..]}"],
+        img[src^="#{internalFileUrlPrefix}"],
+        img[src^="#{Meteor.absoluteUrl internalFileUrlPrefix[1..]}"]
+      """
       .each ->
-        newImages[url2file @getAttribute('src')] = true
+        src = @getAttribute('src')
+        if 0 <= src.indexOf 'gridfs'
+          newImagesInternal[url2internalFile src] = true
+        else
+          newImages[url2file src] = true
       for id of @images
         unless id of newImages
           images[id].count -= 1
@@ -301,6 +441,17 @@ Template.submessage.onRendered ->
           images[id].count += 1
           checkImage id
       @images = newImages
+      for id of @imagesInternal
+        unless id of newImagesInternal
+          imagesInternal[id].count -= 1
+          checkImageInternal id
+      for id of newImagesInternal
+        unless id of @imagesInternal
+          #console.log 'source', id
+          initImageInternal id
+          imagesInternal[id].count += 1
+          checkImageInternal id
+      @imagesInternal = newImagesInternal
 
 scrollDelay = 750
 
@@ -321,6 +472,11 @@ Template.submessage.onDestroyed ->
     if id of images
       images[id].count -= 1
       checkImage id
+
+  threadAuthors[author] -= 1 for author in @authors if @authors?
+  Session.set 'threadAuthors', threadAuthors
+  threadMentions[author] -= 1 for author in @mentions if @mentions?
+  Session.set 'threadMentions', threadMentions
 
 historify = (x, post) -> () ->
   history = messageHistory.get @_id
@@ -345,17 +501,28 @@ absentTags = ->
   ,
     sort: ['key']
 
+here = (id) ->
+  id? and Router.current().route?.getName() == 'message' and
+  Router.current().params?.message == id
+
 Template.submessage.helpers
   tabindex: tabindex
   tabindex5: -> tabindex 5
   tabindex7: -> tabindex 7
   tabindex9: -> tabindex 9
-  here: ->
-    Router.current().route?.getName() == 'message' and
-    Router.current().params?.message == @_id
+  here: -> here @_id
   nothing: {}
   editingRV: -> Template.instance().editing.get()
   editingNR: -> Tracker.nonreactive -> Template.instance().editing.get()
+  editData: ->
+    #_.extend @,
+    _id: @_id
+    title: @title
+    body: @body
+    group: @group
+    editing: @editing  ## to list other editors
+    editTitle: Template.instance().editTitle.get()
+    editBody: Template.instance().editBody.get()
   hideIfEditing: ->
     if Template.instance().editing.get()
       'hidden'
@@ -401,14 +568,17 @@ Template.submessage.helpers
           editor.display.dragFunctions.drop = (e) ->
             #text = e.dataTransfer.getData 'text'
             id = e.dataTransfer?.getData 'application/coauthor-id'
-            if id
-              type = e.dataTransfer.getData 'application/coauthor-type'
+            username = e.dataTransfer?.getData 'application/coauthor-username'
+            type = e.dataTransfer?.getData 'application/coauthor-type'
+            if id or username
               e.preventDefault()
               e = _.omit e, 'dataTransfer', 'preventDefault'
               e.defaultPrevented = false
               e.preventDefault = ->
               e.dataTransfer =
                 getData: ->
+                  if username
+                    return "@#{username}"
                   switch type
                     when 'image'
                       switch ti.data.format
@@ -449,6 +619,9 @@ Template.submessage.helpers
           #    #  when 'latex'
           #    #    e.dataTransfer.setData('text/plain', "\\href{#{id}}{}")
           #    e.dataTransfer.setData('text/plain', "<IMG SRC='coauthor:#{id}'>")
+      editor.on 'change',
+        _.debounce => ti.editBody.set editor.getDoc().getValue()
+      , 100
       editorMode editor, ti.data.format
       editorKeyboard editor, messageKeyboard.get(ti.data._id) ? userKeyboard()
 
@@ -496,6 +669,8 @@ Template.submessage.helpers
   canUndelete: -> canUndelete @_id
   canPublish: -> canPublish @_id
   canUnpublish: -> canUnpublish @_id
+  canMinimize: -> canMinimize @_id
+  canUnminimize: -> canUnminimize @_id
   canSuperdelete: -> canSuperdelete @_id
   canPrivate: -> canPrivate @_id
 
@@ -504,30 +679,57 @@ Template.submessage.helpers
     _id: @_id
     history: messageHistory.get @_id
 
-  folded: -> messageFolded.get @_id
   raw: -> messageRaw.get @_id
   prev: -> messageNeighbors(@)?.prev
   next: -> messageNeighbors(@)?.next
+
+  preview: ->
+    messageHistory.get(@_id)? or
+    (messagePreviewGet() ? on: true).on  ## on if not editing
+  sideBySide: -> messagePreviewGet()?.sideBySide
+  previewSideBySide: ->
+    preview = messagePreviewGet()
+    preview?.on and preview?.sideBySide
+  sideBySideClass: ->
+    if Template.instance().editing
+      preview = messagePreviewGet()
+      if preview? and preview.on and preview.sideBySide
+        'sideBySide'
+      else
+        ''
+    else
+      ''  ## no side-by-side if we're not editing
 
   absentTags: absentTags
   absentTagsCount: ->
     absentTags().count()
 
-Template.registerHelper 'messagePanelClass', ->
-  editingClass =
-    if Template.instance().editing?.get()
-      ' editing'
+Template.belowEditor.helpers
+  preview: -> messagePreviewGet()?.on
+  sideBySide: -> messagePreviewGet()?.sideBySide
+  saved: ->
+    @title == @editTitle and @body == @editBody
+  otherEditors: ->
+    others = _.without @editing, Meteor.user()?.username
+    if others.length > 0
+      " Editing with #{(linkToAuthor @group, other for other in others).join ', '}."
     else
       ''
-  if @deleted
-    "panel-danger message-deleted #{editingClass}"
-  else
-    unless @published
-      "panel-warning message-unpublished #{editingClass}"
-    else if @private
-      "panel-info message-private #{editingClass}"
-    else
-      "panel-primary message-public #{editingClass}"
+
+panelClass =
+  deleted: 'panel-danger'
+  unpublished: 'panel-warning'
+  private: 'panel-info'
+  minimized: 'panel-success'
+  published: 'panel-primary'
+Template.registerHelper 'messagePanelClass', ->
+  #console.log 'rendering', @_id, @
+  classes = []
+  classes.push mclass = messageClass.call @
+  classes.push panelClass[mclass]
+  if Template.instance().editing?.get()
+    classes.push 'editing'
+  classes.join ' '
 
 Template.registerHelper 'formatCreator', ->
   linkToAuthor @group, @creator
@@ -606,10 +808,7 @@ Template.submessage.events
     dropdownToggle e
     false  ## prevent form from submitting
 
-  'click .foldButton': (e, t) ->
-    e.preventDefault()
-    e.stopPropagation()
-    messageFolded.set @_id, not messageFolded.get @_id
+  'click .foldButton': messageFoldHandler
 
   'click .rawButton': (e, t) ->
     e.preventDefault()
@@ -625,13 +824,25 @@ Template.submessage.events
     else
       Meteor.call 'messageEditStart', message
 
+  'click .togglePreview': (e, t) ->
+    e.preventDefault()
+    e.stopPropagation()
+    messagePreviewSet (preview) -> _.extend {}, preview,
+      on: not preview.on
+
+  'click .sideBySidePreview': (e, t) ->
+    e.preventDefault()
+    e.stopPropagation()
+    messagePreviewSet (preview) -> _.extend {}, preview,
+      sideBySide: not preview.sideBySide
+
   'click .publishButton': (e, t) ->
     e.preventDefault()
     e.stopPropagation()
     message = t.data._id
     ## Stop editing if we are publishing.
-    if not @published and editing @
-      Meteor.call 'messageEditStop', message
+    #if not @published and editing @
+    #  Meteor.call 'messageEditStop', message
     Meteor.call 'messageUpdate', message,
       published: not @published
     dropdownToggle e
@@ -640,6 +851,7 @@ Template.submessage.events
     e.preventDefault()
     e.stopPropagation()
     message = t.data._id
+    messageFolded.set message, not @deleted or @minimized or images[@_id]?.count > 0
     ## Stop editing if we are deleting.
     if not @deleted and editing @
       Meteor.call 'messageEditStop', message
@@ -653,6 +865,15 @@ Template.submessage.events
     message = t.data._id
     Meteor.call 'messageUpdate', message,
       private: not @private
+    dropdownToggle e
+
+  'click .minimizeButton': (e, t) ->
+    e.preventDefault()
+    e.stopPropagation()
+    message = t.data._id
+    messageFolded.set message, @deleted or not @minimized or images[@_id]?.count > 0
+    Meteor.call 'messageUpdate', message,
+      minimized: not @minimized
     dropdownToggle e
 
   'click .editorKeyboard': (e, t) ->
@@ -670,10 +891,11 @@ Template.submessage.events
     editorMode Template.instance().editor, format
     dropdownToggle e
 
-  'keyup input.title': (e, t) ->
+  'input input.title': (e, t) ->
     e.stopPropagation()
     message = t.data._id
     Meteor.clearTimeout t.timer
+    t.editTitle.set e.target.value
     t.timer = Meteor.setTimeout ->
       Meteor.call 'messageUpdate', message,
         title: e.target.value
@@ -874,10 +1096,6 @@ Template.replyButtons.helpers
   canAttach: -> canPost @group, @_id
   canPublicReply: -> 'public' in (@threadPrivacy ? ['public'])
   canPrivateReply: -> 'private' in (@threadPrivacy ? ['public'])
-
-Template.tableOfContentsMessage.helpers
-  parentId: ->
-    Template.parentData()._id
 
 Template.tableOfContentsMessage.onRendered ->
   messageDrag.call @, @find('a'), false

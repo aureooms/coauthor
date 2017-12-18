@@ -6,6 +6,8 @@ collaboration on unsolved problems in theoretical computer science, so
 e.g. you'll find LaTeX math support; hopefully it will have applications
 in other fields too.
 
+![Coauthor screenshot](http://erikdemaine.org/software/coauthor_large.png)
+
 ## Features So Far ##
 
 * **Live updates**/redraw of everything, thanks to
@@ -13,8 +15,8 @@ in other fields too.
   If you're looking at a problem and someone posts/edits something,
   you see it as quickly as they see their preview (roughly 1-second delay).
 
-* **Real-time editing** of messages in the style of EtherPad (Operational
-  Transforms), if people feel like editing together
+* **Real-time editing** of messages in the style of Google Docs/EtherPad
+  (Operational Transforms), if people feel like editing together
   (useful if e.g. working on a proof together).
   When editing, you see near-instant updates from the other side(s).
   Keep track of authorship by who is in edit mode at the time.
@@ -51,9 +53,12 @@ in other fields too.
     `\raisebox{amount}{text}`, `\par`,
     `\BY{...}`, `\YEAR{...}`,
     `\chapter`, `\section`, `\subsection`, `\subsubsection`, `\footnote`,
-    `\includegraphics[width/height]{url}`, `\"`, `\'`, ```\` ```,
-    `\^`, `\~`, `\=`, `\c`, `\v`, `\u`, `\H`, ``` `` ```, `''`,
-    `\&`, `\$`, `\{`, `\}`, `~`, `--`, `---`, `{`, `}`, `\\`, `\item`,
+    `\includegraphics[width/height]{url}`,
+    `\"`, `\'`, ```\` ```, `\^`, `\~`, `\=`, `\c`, `\v`, `\u`, `\H`,
+    `\textasciitilde`, `\textasciicircum`, `\textbackslash`,
+    `\textellipsis`, `\dots`, `\ldots`,
+    `\&`, `\$`, `\{`, `\}`, `\%`, ``` `` ```, `''`,
+    `~`, `--`, `---`, `{`, `}`, `\\`, `\item`;
     `\begin/\end` for environments `verbatim`, `enumerate`, `itemize`,
     `equation`, `eqnarray`, `align`,
     `problem`, `theorem`, `conjecture`, `lemma`, `corollary`, `fact`,
@@ -65,8 +70,8 @@ in other fields too.
     `<strong>`, `<i>`, `<em>`, `<u>`, `<s>`, `<strike>`, `<del>`, `<code>`,
     `<hr>`, `<br>`, `<table>`, `<thead>`, `<caption>`,
     `<tbody>`, `<tr>`, `<th>`, `<td>`, `<pre>`,
-    `<img src/alt/width/height>`, `<video controls>`, `<source src>`
-    attributes `title/style/class/aria-*`.
+    `<img src/alt/width/height>`, `<video controls>`, `<source src>`;
+    attributes `title`, `style`, `class`, `aria-*`.
 
 * [CodeMirror editor](http://codemirror.net/) supports syntax highlighting,
   block folding, bracket matching, line numbering, light and dark themes,
@@ -83,7 +88,9 @@ in other fields too.
   last update, number of posts, or whether subscribed (by clicking on the
   corresponding column, once for default sort order and again for
   opposite sort order).  Intelligent handling of numbers while sorting,
-  e.g. "9." comes before "10.".
+  e.g. "9." comes before "10.".  Deleted messages always sort to the very
+  bottom; minimized messages always sort near the bottom; and unpublished
+  messages always sort near the top.
 
 * "**Live Feed**" to watch messages as they get changed/posted.  Useful for
   projecting the latest activity onto a big screen while a group is gathered
@@ -94,10 +101,13 @@ in other fields too.
   Useful for progress reports since the last meeting.
 
 * **Threaded** message organization, with arbitrary tree structure (root
-  messages, replies with arbitrary depth).  You can focus on the subthread
-  rooted at any message (click on the arrow), or fold away the contents of a
-  subthread to focus on the rest.
-  (Currently the folds are not preserved across sessions / rerenders.)
+  messages, replies with arbitrary depth).  You can **focus** on the subthread
+  rooted at any message (click on the arrow), or **fold** away the contents of
+  a subthread to focus on the rest (click on the minus sign).
+  Folding with the minus/plus sign is a local and temporary change (resets when
+  reloading the page), while **minimizing** the message makes it start out
+  folded for all users (e.g., when a discussion/question resolves and is
+  no longer important, but you want to preserve it for future reference).
 
 * **Dragging** messages to change the parentage/hierarchy, or move their
   position within their parent.  You must drag *onto* the table of contents
@@ -107,10 +117,26 @@ in other fields too.
   while dragging onto the slot before a message makes the dragged message the
   immediately preceding sibling.  Dialog confirms move.
 
-* **Tags**: attached an arbitrary set of strings to a message.  Find other
+* **Tags**: attach an arbitrary set of strings to a message.  Find other
   messages with the same tag by clicking on a tag.
 
-* **Search** for posts by a particular user by clicking on their username.
+* **Search** across an entire group for posts by keywords using the search bar
+  at the top.  Search for a word as a (whole) `word`, `prefix*`, `*suffix`,
+  `*substring*`, or `prefix*suffix`.
+  Lower-case letters are case insensitive,
+  while upper-case letters are case sensitive.
+  Restrict search to title or body via `title:...` or `body:...`
+  (default is to search both).
+  Negative match with minus sign
+  (e.g., `-word` excludes documents with whole `word`).
+  Search for a regular expression via `regex:...`.
+  Use quotes (`'...'` or `"..."`) to search for phrases or `regex:"..."`
+  to search for regular expressions with spaces in them; normally,
+  spaces act as an AND query.
+  `tag:...` does an exact match for a specified tag; it can be negated.
+
+* **User search**:
+  find posts by a particular user by clicking on their username.
   Search for your own posts in a group by clicking the "My Posts" button.
 
 * **Statistics** about user's and all posts within a group, by day, week
@@ -131,8 +157,9 @@ in other fields too.
   (In the future, they and other visual file types such as PDF will be
   rendered by some kind of thumbnails.)
 
-* Messages can start **Unpublished**, or after publication, **Deleted**;
-  in either state, the message is hidden from people who are not authors
+* Messages can start/be marked **Unpublished** (not yet finished) or
+  **Deleted** (mistake / no longer useful).
+  In either state, the message is hidden from people who are not authors
   (an *author* is someone who has edited the message), @-mentioned
   (via `@username`), or superusers.
   The default published state is initially true (so everyone sees the new
@@ -141,7 +168,7 @@ in other fields too.
 
 * Threads can be marked as allowing **public** replies only (the default, for
   maximum collaboration), **private** replies only (useful for solved
-  problems/puzzles, to prevent accidentally spoiling of the fun), or
+  problems/puzzles, to prevent accidentally spoiling the fun), or
   **public and private** replies (useful for feedback on lectures, for example,
   which can have varying relevance to the entire group).  Replies to replies
   inherit the public/private state of their parent.  Superusers can
@@ -160,8 +187,16 @@ in other fields too.
   about their own edits.
 
 * **Time travel**: You can drag through history and see past versions.
-  In general, there should be good, automatic history tracking of everything,
-  including a not-yet-visible reparenting feature.
+  In general, there should be good, automatic history tracking of everything.
+
+* **Permissions** for each user in each group (and globally):
+     * read: see the group and read the messages (otherwise invisible)
+     * post: create new messages, replies, etc. in the group
+     * edit: modify other people's messages
+     * super: somewhat dangerous "super" operations like history-destroying
+       superdelete, history-creating import, and the ability to see other users'
+       deleted messages
+     * admin: administer over other users, in particular setting permissions
 
 * **Superuser operations** (only for superusers):
   * Import from LaTeX document with figures attached as a ZIP file
@@ -183,63 +218,6 @@ in other fields too.
   `defaults write NSGlobalDomain ApplePressAndHoldEnabled -bool false`
   then restart your web browser.
 
-## Installation and Permissions ##
+## [Installation](INSTALL.md) ##
 
-Here is how to get a local test server running:
-
-1. `curl https://install.meteor.com/ | sh` on UNIX, or use the
-   [Windows installer](https://www.meteor.com/install)
-2. `git clone https://github.com/edemaine/coauthor.git`
-3. `cd coauthor`
-4. `meteor npm install`
-5. `meteor`
-6. Open the website [http://localhost:3000/](http://localhost:3000/)
-7. Create an account
-8. `meteor mongo`
-9. Give your account permissions as follows:
-
-```
-meteor:PRIMARY> db.users.update({username: 'edemaine'}, {$set: {'roles.*': ['read', 'post', 'edit', 'super', 'admin']}})
-WriteResult({ "nMatched" : 1, "nUpserted" : 0, "nModified" : 1 })
-```
-
-`*` means all groups, so this user gets the following permissions globally:
-
-* read: see the group and read the messages (otherwise invisible)
-* post: create new messages, replies, etc. in the group
-* edit: modify other people's messages
-* super: somewhat dangerous "super" operations like history-destroying
-  superdelete, history-creating import, and the ability to see other users'
-  deleted messages
-* admin: administer over other users, in particular setting permissions
-
-To deploy to a public server, we recommend
-[meteor-up](https://github.com/kadirahq/meteor-up).
-
-1. Edit `.deploy/mup.js` to point to your SSH key (for accessing the server),
-   your SSL certificate (for an https server), and your SMTP server in the
-   [`MAIL_URL` environment variable](https://docs.meteor.com/api/email.html)
-   (for sending email notifications &mdash; to run a local SMTP server,
-   see below, and use e.g. `smtp://yourhostname.org:25/`).
-   [`smtp://localhost:25/` may not work because of mup's use of docker.]
-2. `mup setup` to install all necessary software on the server
-3. `mup deploy` each time you want to deploy code to server
-   (initially and after each `git pull`)
-
-You'll also need an SMTP server to send email notifications.
-In Postfix, modify the `/etc/postfix/main.cf` configuration as follows
-(substituting your own hostname):
-
- * Set `myhostname = yourhostname.com`
- * Add `, $myhostname` to `mydestination`
- * Add ` 172.17.0.0/16` to `mynetworks`:
-
-   `mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128 172.17.0.0/16`
-
-If you want `coauthor@yourhostname.com` to receive email,
-add an alias like `coauthor: edemaine@mit.edu` to `/etc/aliases`
-and then run `sudo newaliases`.
-
-If you want to use [Kadira](https://kadira.io/) to monitor the performance,
-errors, etc., the package is already installed; just add credentials to a
-`server/kadira.js` file.
+See [detailed installation instructions](INSTALL.md).

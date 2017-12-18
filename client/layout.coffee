@@ -9,6 +9,7 @@ linkToRoutes =
   stats: true
   users: true
   settings: true
+  search: true
 
 Template.layout.helpers
   activeGroup: ->
@@ -39,8 +40,39 @@ Template.registerHelper 'couldSuper', ->
 Template.registerHelper 'super', ->
   Session.get 'super'
 
+Template.registerHelper 'globalSuper', ->
+  Session.get('super') and canSuper wildGroup
+
 Template.layout.events
   'click .superButton': (e) ->
     e.preventDefault()
     e.stopPropagation()
     Session.set 'super', not Session.get 'super'
+  'submit .searchForm': (e, t) ->
+    e.preventDefault()
+    e.stopPropagation()
+    Router.go 'search',
+      group: routeGroup()
+      search: t.find('.searchText').value
+      0: '*'
+      1: '*'
+      2: '*'
+      3: '*'
+      4: '*'
+      5: '*'
+      6: '*'
+      7: '*'
+      8: '*'
+      9: '*'
+  'dragstart a.author': (e) ->
+    username = e.target.getAttribute 'data-username'
+    dataTransfer = e.originalEvent.dataTransfer
+    dataTransfer.effectAllowed = 'linkCopy'
+    dataTransfer.setData 'text/plain', e.target.getAttribute 'href'
+    dataTransfer.setData 'application/coauthor-username', username
+  'dragenter a.author': (e) ->
+    e.preventDefault()
+    e.stopPropagation()
+  'dragover a.author': (e) ->
+    e.preventDefault()
+    e.stopPropagation()

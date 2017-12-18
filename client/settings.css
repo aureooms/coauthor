@@ -1,3 +1,6 @@
 /*.settings > tbody > tr > th, .settings > tbody > tr > td { vertical-align: middle; }*/
 .settings td { min-width: 400px; }
 .settings .description { font-size: smaller; font-weight: normal; }
+
+/* typeahead.js makes a containing span; simulate behavior of .form-control */
+.twitter-typeahead { width: 100%; float: left; }

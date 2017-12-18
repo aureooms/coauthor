@@ -1,6 +1,13 @@
 {
+  "coauthor": {
+    "timezone": "US/Eastern",
+    "profiling": false
+  },
   "sharejs": {
     "options": {
+      "browserChannel": {
+        "cors": "*"
+      },
       "db": {
         "type": "none"
       },

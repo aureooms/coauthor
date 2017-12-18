@@ -1,6 +1,7 @@
 @wildGroup = '*'
 @anonymousUser = '*'
 @readAllUser = '[READ-ALL]'
+@allRoles = ['read', 'post', 'edit', 'super', 'admin']
 
 @escapeGroup = escapeKey
 @unescapeGroup = unescapeKey
@@ -24,6 +25,7 @@ if Meteor.isServer
   Groups._ensureIndex [['name', 1]]
 
 @findGroup = (group) ->
+  return group unless group?
   return group if group.name?
   Groups.findOne
     name: group
@@ -43,7 +45,7 @@ if Meteor.isServer
   if user == readAllUser
     return role == 'read'
   role in (user?.roles?[wildGroup] ? []) or
-  role in (user?.roles?[escapeGroup(group.name ? group)] ? []) or
+  role in (user?.roles?[escapeGroup(group?.name ? group)] ? []) or
   role in groupAnonymousRoles group
 
 @memberOfGroup = (group, user = Meteor.user()) ->
@@ -152,7 +154,7 @@ if Meteor.isServer
         @ready()
 
 @groupMembers = (group) ->
-  findGroup(group).members ? []
+  findGroup(group)?.members ? []
 
 @sortedGroupMembers = (group) ->
   _.sortBy groupMembers(group), userSortKey
@@ -177,9 +179,8 @@ Meteor.methods
           name: group
         , $pull: anonymous: role
     else
-      key = 'roles.' + escapeGroup group
-      op = {}
-      op[key] = role
+      op =
+        "roles.#{escapeGroup group}": role
       if yesno
         Meteor.users.update
           username: user
@@ -214,6 +215,8 @@ Meteor.methods
        $set: weekStart: weekStart
 
   groupNew: (group) ->
+    check Meteor.userId(), String
+    username = Meteor.user().username
     check group, String
     unless groupRoleCheck wildGroup, 'super'
       throw new Meteor.Error 'groupNew.unauthorized',
@@ -226,40 +229,100 @@ Meteor.methods
         "Attempt to create group '#{group}' which already exists"
     Groups.insert
       name: group
-      members: []
+      members: []  ## will be updated by role change below
       created: new Date
-      creator: Meteor.user().username
+      creator: username
+    ## Give the group creator full access rights to the group,
+    ## so that they don't need global admin permissions to tweak it.
+    Meteor.users.update
+      username: username
+    , $addToSet: "roles.#{escapeGroup group}": $each: allRoles
+
+  groupRename: (groupOld, groupNew) ->
+    check groupOld, String
+    check groupNew, String
+    unless groupRoleCheck wildGroup, 'super'
+      throw new Meteor.Error 'groupRename.unauthorized',
+        "You need global 'super' permissions to rename a group '#{groupOld}'"
+    unless validGroup groupOld
+      throw new Meteor.Error 'groupRename.invalid',
+        "Group name '#{groupOld}' is invalid"
+    if findGroup(groupNew)?
+      throw new Meteor.Error 'groupRename.exists',
+        "Attempt to rename group into '#{groupNew}' which already exists"
+    Groups.update
+      name: groupOld
+    ,
+      $set: name: groupNew
+    , multi: true
+    for db in [Messages, MessagesDiff, Notifications, Tags]
+      db.update
+        group: groupOld
+      ,
+        $set: group: groupNew
+      , multi: true
+    for copy in ['old', 'new']
+      Notifications.update
+        "#{copy}.group": groupOld
+      ,
+        $set: "#{copy}.group": groupNew
+      , multi: true
+    Files.update
+      'metadata.group': groupOld
+    ,
+      $set: "metadata.group": groupNew
+    , multi: true
+    Meteor.users.find
+      "roles.#{escapeGroup groupOld}": $exists: true
+    .forEach (user) ->
+      roles = user.roles[escapeGroup groupOld]
+      Meteor.users.update user._id,
+        $unset: "roles.#{escapeGroup groupOld}": ''
+        $set: "roles.#{escapeGroup groupNew}": roles
 
 @groupSortedBy = (group, sort, options, user = Meteor.user()) ->
   query = accessibleMessagesQuery group, user
   query.root = null
-  mongosort =
-    switch sort.key
-      when 'posts'
-        'submessageCount'
-      when 'updated'
-        'submessageLastUpdate'
-      else
-        sort.key
   options = {} unless options?
-  options.sort = [[mongosort, if sort.reverse then 'desc' else 'asc']]
-  if options.fields
-    options.fields[mongosort] = true
-    if sort.key == 'subscribe'  ## fields needed for subscribedToMessage
-      options.fields.group = true
-      options.fields.root = true
+  if sort?
+    mongosort =
+      switch sort.key
+        when 'posts'
+          'submessageCount'
+        when 'updated'
+          'submessageLastUpdate'
+        else
+          sort.key
+    #options.sort = [[mongosort, if sort.reverse then 'desc' else 'asc']]
+    if options.fields
+      options.fields[mongosort] = true
+      if sort.key == 'subscribe'  ## fields needed for subscribedToMessage
+        options.fields.group = true
+        options.fields.root = true
+      options.fields.deleted = true
+      options.fields.minimized = true
+      options.fields.published = true
   msgs = Messages.find query, options
-  switch sort.key
-    when 'title'
-      key = (msg) -> titleSort msg.title
-    when 'creator'
-      key = (msg) -> userSortKey msg.creator
-    when 'subscribe'
-      key = (msg) -> subscribedToMessage msg
-    else
-      key = null
-  if key?
-    msgs = msgs.fetch()
-    msgs = _.sortBy msgs, key
-    msgs.reverse() if sort.reverse
+  if sort?
+    switch sort.key
+      when 'title'
+        key = (msg) -> titleSort msg.title
+      when 'creator'
+        key = (msg) -> userSortKey msg.creator
+      when 'subscribe'
+        key = (msg) -> subscribedToMessage msg
+      else
+        key = mongosort
+        #key = (msg) -> msg[mongosort]
+    if key?
+      msgs = msgs.fetch()
+      msgs = _.sortBy msgs, key
+      msgs.reverse() if sort.reverse
+      msgs = _.sortBy msgs,
+        (msg) ->
+          weight = 0
+          weight += 4 if msg.deleted  ## deleted messages go very bottom
+          weight += 2 if msg.minimized  ## minimized messages go bottom
+          weight -= 1 unless msg.published  ## unpublished messages go top
+          weight
   msgs

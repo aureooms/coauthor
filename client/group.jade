@@ -3,7 +3,7 @@ template(name="group")
     .panel.panel-primary
       .panel-heading.clearfix
         span.title.panel-title= group
-        +postButtons
+        +groupButtons
       +messageList
       .panel-footer.clearfix
         p
@@ -16,20 +16,22 @@ template(name="group")
   else
     +badGroup
 
-template(name="postButtons")
-  //button.btn.btn-default.postButton(class=disablePost,name="problem") Pose New Problem
-  //button.btn.btn-default.postButton(class=disablePost,name="discussion") Start Discussion Thread
+template(name="groupButtons")
+  //- button.btn.btn-default.postButton(class=disablePost,name="problem") Pose New Problem
+  //- button.btn.btn-default.postButton(class=disablePost,name="discussion") Start Discussion Thread
   .pull-right
     if super
-      button.btn.btn-warning.sortSetDefault Set Group Default Sort
-      span.space
+      .btn-group
+        button.btn.btn-warning.sortSetDefault Set Group Default Sort
+        if globalSuper
+          button.btn.btn-danger.groupRenameButton Rename Group
     button.btn.btn-info.postButton(class=disableClass, data-original-title=disableTitle, data-toggle='tooltip') Pose New Problem / Discussion
     .btn-group
       a.btn.btn-default.myPostsButton(class=disableMyPosts,href=linkToMyPosts) My Posts
-      a.btn.btn-default.liveButton(href="{{pathFor 'live'}}", title="Show the last n messages, updating live", data-toggle="tooltip") Live Feed
-      a.btn.btn-default.sinceButton(href="{{pathFor 'since'}}", title="Show all messages since a specified time in the past", data-toggle="tooltip") Catchup Since...
+      a.btn.btn-default.liveButton(href="{{pathFor 'live' group=group}}", title="Show the last n messages, updating live", data-toggle="tooltip") Live Feed
+      a.btn.btn-default.sinceButton(href="{{pathFor 'since' group=group}}", title="Show all messages since a specified time in the past", data-toggle="tooltip") Catchup Since...
       a.btn.btn-default.statsButton(href=linkToStats) Statistics
-  //---replaced by clicking columns to trigger sort
+  //- Replaced by clicking columns to trigger sort
     span.space
     .btn-group
       if super
@@ -47,8 +49,26 @@ template(name="postButtons")
           li.sortKey(class="{{activeSort}}")
             a(href=linkToSort)= capitalizedKey
 
+template(name="groupRename")
+  .modal
+    .modal-dialog.groupRename
+      .modal-content
+        .modal-header
+          h2 Rename Group &ldquo;#{routeGroup}&rdquo;
+        .modal-body
+          .alert.alert-warning <b>Warning:</b> Group renaming is dangerous. Old links will not be preserved.
+          form
+            .form-group
+              label(for="groupInput") New group name:
+              input.form-control(id="groupInput", placeholder="Group")
+            .row
+              .col-xs-6
+                button.btn.btn-block.btn-danger.groupRenameButton Rename Group
+              .col-xs-6
+                button.btn.btn-block.btn-success.cancelButton Cancel
+
 template(name="messageList")
-  //div.list-group
+  //-div.list-group
   table.table.table-striped
     thead
       tr
@@ -78,9 +98,9 @@ template(name="messageList")
             span.glyphicon(class=sortingGlyph)
     tbody
       each topMessages
-        if canSee
-          //a.list-group-item(href=messageLink)
-          +messageShort
+        //-if canSee
+        //-a.list-group-item(href=messageLink)
+        +messageShort
 
 template(name="importButtons")
   if canImport
@@ -105,7 +125,7 @@ template(name="superdeleteImport")
           button.btn.btn-success.cancelButton.fullwidth Cancel
 
 template(name="messageShort")
-  tr.messageShort(class=deletedClass)
+  tr.messageShort(class=messageClass)
     td.title.tex2jax
       a(href=messageLink)
         | !{formatTitleOrUntitled}
@@ -119,17 +139,17 @@ template(name="messageShort")
       a(href=messageLink)
         if published
           | {{formatDate published}}
-          //span.author (posed by #{creator} {{formatDate published}})
+          //- span.author (posed by #{creator} {{formatDate published}})
         else
           | {{formatDate created}}
-          //span.author (created by #{creator} {{formatDate created}})
+          //- span.author (created by #{creator} {{formatDate created}})
     td
       a(href=messageLink)= submessageLastUpdate
     td
       a(href=messageLink)
         span.badge(class=zeroClass)= submessageCount
     td.subscribe
-      //a(href=messageLink)
+      //- a(href=messageLink)
       button.btn.btn-default.btn-xs.subscribe
         if subscribed
           span.glyphicon.glyphicon-ok

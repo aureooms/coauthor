@@ -13,7 +13,7 @@ module.exports = {
       one: {}
     },
     docker: {
-      image: 'abernix/meteord:base'
+      image: 'abernix/meteord:node-8.4.0-base'
     },
     buildOptions: {
       serverOnly: true
@@ -34,5 +34,12 @@ module.exports = {
     servers: {
       one: {},
     },
+  },
+
+  // Run 'npm install' before deploying, to ensure packages are up-to-date
+  hooks: {
+    'pre.deploy': {
+      localCommand: 'npm install'
+    }
   },
 };

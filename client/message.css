@@ -5,7 +5,8 @@
 input.title { width: 100%; }
 .author { font-style: italic; }
 .message-body { text-align: justify; }
-.message-footer { width: 100%; padding: 0ex 1em; margin-top: -15px; }
+.message-footer { width: 100%; padding: 0ex 1em; }
+.panel-body { padding-bottom: 0px; } /* always have a footer right below */
 .message-deleted > .message-body, .message-unpublished > .message-body { opacity: 0.6; }
 /*.message-right-buttons { margin: -5px -10px -5px 5px; }*/ /* cf. panel-heading's padding of 10px 15px */
 .message > .panel-heading { padding: 5px 5px 5px 10px; }
@@ -13,15 +14,20 @@ input.title { width: 100%; }
 .messageTitle { display: inline-block; padding: 5px 5px 5px 0px; }
 .messageTags > a:first-child, .messageLabels > span:first-child { margin-left: 0.5em; }
 input.title ~ .message-right-buttons { margin: 0px; }
-.message-reply-buttons { margin-right: 1em; }
+.message-reply-buttons { margin-right: 1em; margin-bottom: 15px; }
 .fileDescription { padding: 0.5ex 0.5em; border-bottom: 1px solid #337ab7;
   display: flex; flex-direction: row;
   justify-content: space-between; align-items: center; }
 .fileDescriptionText { flex-grow: 1; }
 
+.previewButtons { padding: 0px 15px; }
+.sideBySide { width: 50%; margin: 0px; display: inline-block; }
+.previewButtons.sideBySide { float: left; }
+.bodyContainer.sideBySide { float: right; height: 300px; overflow: scroll; }
+  /* 300px matches .CodeMirror's height */
 .ace_editor { width: 100%; height: 20em; }
 
-.children { margin-top: 1.5ex; margin-left: 1em; }
+.children { margin-left: 1em; }
 
 /* Magic to get the entire tag to highlight when hovering over child:
  * http://stackoverflow.com/questions/8114657/how-to-style-the-parent-element-when-hovering-a-child-element#30104683
@@ -45,7 +51,9 @@ img, video { max-width: 100%; max-height: 100vh; }
 .historySlider { margin-left: 5em; margin-right: 5em; }
 .slider.slider-horizontal { width: 100%; }
 
-.panel-secondbody { padding-top: 0px; }
+.panel-secondbody { margin-top: -5px; padding-top: 0px; padding-bottom: 15px; }
+
+.save-alert { padding: 6px 15px; margin-left: 1px; margin-bottom: 0px; }
 
 nav.contents { overflow-y: scroll; padding-bottom: 5px; }
 .contents > li > a { padding: 5px 5px; }
@@ -56,6 +64,7 @@ nav.contents { overflow-y: scroll; padding-bottom: 5px; }
 .contents li > a.deleted { color: #a94442; font-size: x-small; padding: 2px 10px; }
 .contents li > a.unpublished { color: #8a6d3b; font-size: x-small; padding: 2px 10px; }
 .contents li > a.private { color: #5bc0de; }
+.contents li > a.minimized { color: #449d44; font-size: small; padding: 3px 10px; }
 .affix { top: 0px; }
 
 code.raw { white-space: pre-wrap; color: #333; }  /* match <pre> */
@@ -68,8 +77,11 @@ pre { white-space: pre-wrap; }
   background-image: linear-gradient(rgba(0,0,0,0), red, rgba(0,0,0,0)); }
 .onMessageDrop.dragover { background-image: linear-gradient(rgba(0,0,0,0), red, rgba(0,0,0,0)); }
 
-.messageParentConfirm { width: 80vw; }
-.halfHeight { max-height: 35vh; overflow: auto; }
+.messageParentConfirm .modal-content { max-height: 90vh; }
+.flexColumn { display: flex; flex-direction: column; }
+.flexRow { display: flex; flex-direction: row; }
+.flexShrink { min-height: 50px } /* allow shrinking height down to 50px */
+.scrollbars { overflow: auto; float: none; max-height: 100%; }
 .parentArrow { text-align: center; }
 .parentArrow div { vertical-align: top; display: inline-block; }
 .parentArrow1 { border-left: red dotted 2px; border-bottom: red dotted 2px; height: 14px; width: 15%; }
@@ -101,4 +113,7 @@ em em em em em { font-style: italic }
 em em em em em em { font-style: normal }
 
 /* Author search highlighting */
-.highlight { background: yellow; }
+.highlight { background: yellow; color: black; }
+
+/* Search results */
+.panel-heading .pull-right.badge { margin-top: 2px; }

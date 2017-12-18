@@ -1,5 +1,5 @@
 import { defaultFormat } from './settings.coffee'
-import { ShareJS } from 'meteor/mizzao:sharejs'
+import { ShareJS } from 'meteor/edemaine:sharejs'
 
 @untitledMessage = '(untitled)'
 
@@ -59,9 +59,9 @@ if Meteor.isServer
   recurse message
   descendants
 
-@accessibleMessagesQuery = (group, user = Meteor.user()) ->
+@accessibleMessagesQuery = (group, user = Meteor.user(), client = Meteor.isClient) ->
   ## Mimic logic of `canSee` below.
-  if groupRoleCheck group, 'super', user
+  if canSuper group, client, user #groupRoleCheck group, 'super', user
     ## Super-user can see all messages, even unpublished/deleted messages.
     group: group
   else if groupRoleCheck group, 'read', user
@@ -76,7 +76,9 @@ if Meteor.isServer
       ,
         "authors.#{escapeUser user.username}": $exists: true
       ,
-        body: ///#{atRe}#{user.username}(?!\w)///
+        title: atRe user
+      ,
+        body: atRe user
       ]
     else
       group: group
@@ -148,7 +150,7 @@ if Meteor.isServer
   ## true if the root is deleted/unpublished and not authored by the user,
   ## in which case we reveal the message to the user (but seems better than
   ## having a dangling root pointer...).
-  addRootsToQuery = (query, options = {}) ->
+  @addRootsToQuery = (query, options = {}) ->
     #options = _.clone options  ## avoid modifying caller's options
     options.fields = root: 1  ## just get (and depend on) root and _id
     messages = Messages.find query, options
@@ -170,7 +172,8 @@ if Meteor.isServer
   if group == wildGroup
     delete query.group
   if atMentions
-    query.$or.push body: ///#{atRe}#{author}(?!\w)///
+    query.$or.push title: atRe author
+    query.$or.push body: atRe author
   query
 
 @messagesBy = (group, author) ->
@@ -179,7 +182,18 @@ if Meteor.isServer
     #limit: parseInt(@limit)
 
 @atMentioned = (message, author) ->
-  ///#{atRe}#{author}(?!\w)///.test message.body
+  re = atRe author
+  re.test(message.title) or re.test(message.body)
+
+@atMentions = (message) ->
+  return [] unless message?
+  mentions = []
+  re = atRe()
+  while (match = re.exec message.title)?
+    mentions.push match[1]
+  while (match = re.exec message.body)?
+    mentions.push match[1]
+  mentions
 
 if Meteor.isServer
   Meteor.publish 'messages.author', (group, author) ->
@@ -352,23 +366,28 @@ if Meteor.isServer
   else
     false
 
-@canPost = (group, parent) ->
+@canPost = (group, parent, user = Meteor.user()) ->
   ## parent actually ignored
-  Meteor.userId()? and
-  groupRoleCheck group, 'post'
+  #Meteor.userId()? and
+  user? and
+  groupRoleCheck group, 'post', user
 
-@canEdit = (msg) ->
+@canEdit = (msg, user = Meteor.user()) ->
   ## Can edit message if an "author" (the creator or edited in the past),
   ## or if we have global edit privileges in this group.
   msg = findMessage msg
   return false unless msg?
-  escapeUser(Meteor.user()?.username) of (msg.authors ? {}) or
-  groupRoleCheck msg.group, 'edit'
+  user? and (
+    escapeUser(user?.username) of (msg.authors ? {}) or
+    groupRoleCheck msg.group, 'edit', user
+  )
 
 @canDelete = canEdit
 @canUndelete = canEdit
 @canPublish = canEdit
 @canUnpublish = canEdit
+@canMinimize = canEdit
+@canUnminimize = canEdit
 ## Older behavior: only superusers can unpublish once published
 #@canUnpublish = (message) ->
 #  canSuper message2group message
@@ -388,7 +407,8 @@ if Meteor.isServer
   message = findMessage message
   return false unless user?.username
   escapeUser(user.username) of (message.authors ? {}) or
-  (message.body and 0 <= message.body.search ///#{atRe}#{user.username}(?!\w)///)
+  (message.title and atRe(user).test message.title) or
+  (message.body and atRe(user).test message.body)
 
 @canPrivate = (message) ->
   message = findMessage message
@@ -412,8 +432,9 @@ idle = 1000   ## one second
 @message2group = (message) ->
   findMessage(message)?.group
 
-@findMessage = (message) ->
-  message = Messages.findOne message unless message._id?
+@findMessage = (message, options) ->
+  if message? and not message._id?
+    message = Messages.findOne message, options
   message
 
 @findMessageParent = (message) ->
@@ -519,11 +540,11 @@ _submessagesChanged = (root) ->
 if Meteor.isServer
   rootMessages().forEach _submessagesChanged
 
-checkPrivacy = (privacy, root) ->
+checkPrivacy = (privacy, root, user = Meteor.user()) ->
   return unless privacy?
   root = findMessageRoot root  ## can pass message or message ID
   return unless root?
-  unless canSuper root.group
+  unless canSuper root.group, false, user
     switch privacy
       when true
         unless root.threadPrivacy? and 'private' in root.threadPrivacy
@@ -535,15 +556,51 @@ checkPrivacy = (privacy, root) ->
             "Cannot make message public in thread '#{root._id}'"
   null
 
+export messageContentFields = [
+  'title'
+  'body'
+  'format'
+  'file'
+  'tags'
+  'published'
+  'deleted'
+  'private'
+  'minimized'
+]
+
+export messageExtraFields = [
+  'editing'
+  'submessageCount'
+  'submessageLastUpdated'
+  #'children'
+  #'root'
+]
+
+export messageFilterExtraFields = (msg) ->
+  if msg?  ## important to preserve null, to represent "no old" (created)
+    _.omit msg, messageExtraFields
+  else
+    msg
+
 ## The following should be called directly only on the server;
 ## clients should use the corresponding method.
 _messageUpdate = (id, message, authors = null, old = null) ->
+  ## Compare with 'old' if provided (in cases when it's already been
+  ## fetched by the server); otherwise, load id from Messages.
+  old = Messages.findOne id unless old?
+
   ## authors is set only when internal to server, in which case we bypass
   ## authorization checks, which already happened in messageEditStart.
   unless authors?
-    check Meteor.userId(), String  ## should be done by 'canEdit'
-    authors = [Meteor.user().username]
-    return unless canEdit id
+    ## If authors == null, we're guaranteed to be in a method, so we
+    ## can use Meteor.user().
+    user = Meteor.user()
+    #check Meteor.userId(), String  ## should be done by 'canEdit'
+    authors = [user.username]
+    unless canEdit old, user
+      throw new Meteor.Error 'messageUpdate.unauthorized',
+        "Insufficient permissions to edit message '#{id}' in group '#{old.group}'"
+    checkPrivacy message.private, old, user
   check message,
     #url: Match.Optional String
     title: Match.Optional String
@@ -556,37 +613,33 @@ _messageUpdate = (id, message, authors = null, old = null) ->
     published: Match.Optional Boolean
     deleted: Match.Optional Boolean
     private: Match.Optional Boolean
-  checkPrivacy message.private, id
+    minimized: Match.Optional Boolean
 
-  ## Don't update if there aren't any actual differences.  Compare with 'old'
-  ## if provided (in cases when it's already been fetched by the server);
-  ## otherwise, load id from Messages.
-  old = Messages.findOne id unless old?
-  diff = false
+  ## Don't update if there aren't any actual differences.
+  difference = false
   for own key of message
     if old[key] != message[key]
-      diff = true
+      difference = true
       break
-  return unless diff
+  return unless difference
 
   now = new Date
   if message.published == true
     message.published = now
   message.updated = now
   message.updators = authors
+  diff = _.clone message
   for author in authors
     message["authors." + escapeUser author] = now
   Messages.update id,
     $set: message
-  for author in authors
-    delete message["authors." + escapeUser author]
-  message.id = id
-  diffid = MessagesDiff.insert message
-  message._id = diffid
+  diff.id = id
+  diffid = MessagesDiff.insert diff
+  diff._id = diffid
   #_submessagesChanged old.root ? id
   ## In this special case, we can efficiently simulate the behavior of
   ## _submessagesChanged via a direct update to the root:
-  if _consideredSubmessage message, old
+  if Meteor.isServer and _consideredSubmessage message, old
     rootUpdate = $max: submessageLastUpdate: message.updated
     if old.root? and not _consideredSubmessage old
       rootUpdate.$inc = submessageCount: 1  ## considered a new submessage
@@ -595,7 +648,7 @@ _messageUpdate = (id, message, authors = null, old = null) ->
     ## If this message is no longer considered a submessage, we need to
     ## recompute from scratch in order to find the new last update.
     _submessagesChanged old.root ? id
-  notifyMessageUpdate message if Meteor.isServer  ## client in simulation
+  notifyMessageUpdate message, old if Meteor.isServer  ## client in simulation
   diffid
 
 _messageAddChild = (child, parent, position = null) ->
@@ -725,20 +778,21 @@ if Meteor.isServer
   docs.find().forEach (doc) ->
     ShareJS.model.delete doc._id
 
-  editor2messageUpdate = (id) ->
+  editor2messageUpdate = (id, editors) ->
     Meteor.clearTimeout editorTimers[id]
     doc = Meteor.wrapAsync(ShareJS.model.getSnapshot) id
     #console.log id, 'changed to', doc.snapshot
-    msg = Messages.findOne id
+    msg = findMessage id
     unless msg.body == doc.snapshot
       _messageUpdate id,
         body: doc.snapshot
-      , msg.editing, msg
+      , editors, msg
 
   delayedEditor2messageUpdate = (id) ->
     Meteor.clearTimeout editorTimers[id]
+    editors = findMessage(id).editing
     editorTimers[id] = Meteor.setTimeout ->
-      editor2messageUpdate id
+      editor2messageUpdate id, editors
     , idle
 
 Meteor.methods
@@ -760,11 +814,13 @@ Meteor.methods
       published: Match.Optional Boolean
       deleted: Match.Optional Boolean
       private: Match.Optional Boolean
-    unless canPost group, parent
+      minimized: Match.Optional Boolean
+    user = Meteor.user()
+    unless canPost group, parent, user
       throw new Meteor.Error 'messageNew.unauthorized',
         "Insufficient permissions to post new message in group '#{group}' under parent '#{parent}'"
     root = findMessageRoot parent
-    checkPrivacy message.private, root
+    checkPrivacy message.private, root, user
     unless message.private?
       ## If root says private only, default is to be private.
       ## Otherwise, match parent.
@@ -777,25 +833,26 @@ Meteor.methods
       #if root?.threadPrivacy? and 'public' not in root.threadPrivacy
       #  message.private = true
     now = new Date
-    username = Meteor.user().username
-    message.creator = username
-    message.created = now
-    message.authors =
-      "#{escapeUser username}": now
     message.group = group
-    #message.parent: parent         ## use children, not parent
-    message.children = []
     ## Default content.
     message.title = "" unless message.title?
     message.body = "" unless message.body?
-    message.format = Meteor.user()?.profile?.format or defaultFormat unless message.format?
+    message.format = user?.profile?.format or defaultFormat unless message.format?
     message.tags = {} unless message.tags?
-    message.published = autopublish() unless message.published?
-    message.updators = [Meteor.user().username]
+    message.published = autopublish user unless message.published?
+    message.updators = [user.username]
     message.updated = now
     if message.published == true
       message.published = now
     message.deleted = false unless message.deleted?
+    ## Content specific to Messages, not MessagesDiff
+    diff = _.clone message
+    message.creator = user.username
+    message.created = now
+    message.authors =
+      "#{escapeUser user.username}": now
+    #message.parent: parent         ## use children, not parent
+    message.children = []
     ## Speed up _messageParent by presetting root
     if parent?
       message.root = root._id
@@ -805,6 +862,7 @@ Meteor.methods
       message.submessageLastUpdate = now
     ## Actual insertion
     id = Messages.insert message
+    message._id = id
     ## Parenting
     if parent?
       #_messageParent id, parent, position, null  ## there's no old parent
@@ -815,22 +873,15 @@ Meteor.methods
       #_submessagesChanged message.root
       ## In fact, in this special case, we can efficiently simulate the
       ## behavior of _submessagesChanged via a direct update to the root:
-      if _consideredSubmessage message
+      if Meteor.isServer and _consideredSubmessage message
         Messages.update message.root,
           $inc: submessageCount: 1
           $max: submessageLastUpdate: message.updated
-    ## Prepare for MessagesDiff
-    delete message.creator
-    delete message.created
-    delete message.authors
-    delete message.children
-    delete message.root
-    delete message.submessageCount
-    delete message.submessageLastUpdate
-    message.id = id
-    diffid = MessagesDiff.insert message
-    message._id = diffid
-    notifyMessageUpdate message, true if Meteor.isServer  ## created = true
+    ## Store diff
+    diff.id = id
+    diffid = MessagesDiff.insert diff
+    diff._id = diffid
+    notifyMessageUpdate message, null if Meteor.isServer  ## null means created
     id
 
     ## Initial URL (short name) is the Mongo-provided ID.  User can edit later.
@@ -876,7 +927,7 @@ Meteor.methods
       Messages.update id,
         $pull: editing: Meteor.user().username
       unless Messages.findOne(id).editing?.length
-        editor2messageUpdate id
+        editor2messageUpdate id, [Meteor.user().username]
         ShareJS.model.delete id
     ## xxx should add to last MessagesDiff (possibly just made) that
     ## Meteor.user().username just committed this version.
@@ -896,6 +947,7 @@ Meteor.methods
       published: Match.Optional Match.OneOf Date, Boolean
       deleted: Match.Optional Boolean
       #private: Match.Optional Boolean
+      #minimized: Match.Optional Boolean
       creator: Match.Optional String
       created: Match.Optional Date
       #updated and updators added automatically from last diff
@@ -912,6 +964,7 @@ Meteor.methods
       tags: Match.Optional Match.Where validTags
       deleted: Match.Optional Boolean
       #private: Match.Optional Boolean
+      #minimized: Match.Optional Boolean
       updated: Match.Optional Date
       updators: Match.Optional [String]
       published: Match.Optional Match.OneOf Date, Boolean
@@ -1074,25 +1127,3 @@ Meteor.methods
   neighbors.prev = messages[index-1] if index > 0
   neighbors.next = messages[index+1] if index < messages.length - 1
   neighbors
-
-## Upgrade from old file message format (format 'file', body = file pointer)
-## to new file message format (file = file pointer)
-if Meteor.isServer
-  Messages.find
-    format: 'file'
-  .forEach (msg) ->
-    Messages.update msg._id,
-      $set:
-        format: defaultFormat
-        title: ''
-        body: ''
-        file: msg.body
-  MessagesDiff.find
-    format: 'file'
-  .forEach (diff) ->
-    MessagesDiff.update diff._id,
-      $set:
-        format: defaultFormat
-        title: ''
-        body: ''
-        file: diff.body

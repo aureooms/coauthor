@@ -14,6 +14,7 @@ Template.settings.helpers
   autopublish: autopublish
   notificationsOn: notificationsOn
   notificationsDefault: notificationsDefault
+  notificationsSeparate: notificationsSeparate
   notificationsAfter: ->
     after = myAfter @
     "#{after.after} #{after.unit}#{if after.after == 1 then '' else 's'}"
@@ -28,6 +29,8 @@ Template.settings.helpers
   autosubscribeGroup: -> autosubscribe routeGroup()
   autosubscribeGlobal: -> autosubscribe wildGroup
   theme: -> capitalize theme()
+  previewOn: -> messagePreviewDefault().on
+  previewSideBySide: -> messagePreviewDefault().sideBySide
   dropbox: ->
     'dropbox' of (Meteor.user().services ? {})
 
@@ -57,6 +60,12 @@ Template.settings.events
     e.stopPropagation()
     Meteor.users.update Meteor.userId(),
       $set: "profile.notifications.on": not notificationsOn()
+
+  'click .notificationsSeparateButton': (e, t) ->
+    e.preventDefault()
+    e.stopPropagation()
+    Meteor.users.update Meteor.userId(),
+      $set: "profile.notifications.separate": not notificationsSeparate()
 
   'click .notifySelfButton': (e, t) ->
     e.preventDefault()
@@ -94,6 +103,20 @@ Template.settings.events
           'light'
         else
           'dark'
+
+  'click .previewButton': (e, t) ->
+    e.preventDefault()
+    e.stopPropagation()
+    Meteor.users.update Meteor.userId(),
+      $set: "profile.preview.on":
+        not messagePreviewDefault().on
+
+  'click .sideBySideButton': (e, t) ->
+    e.preventDefault()
+    e.stopPropagation()
+    Meteor.users.update Meteor.userId(),
+      $set: "profile.preview.sideBySide":
+        not messagePreviewDefault().sideBySide
 
   'click .linkDropbox': (e, t) ->
     e.preventDefault()
@@ -150,3 +173,59 @@ Template.emailEditor.events
   'click .saveButton': saveButton (email) ->
     if email != currentEmail()
       Meteor.call 'userEditEmail', email
+
+timezones = []
+#timezoneSource = new Bloodhound
+#  datumTokenizer: Bloodhound.tokenizers.whitespace
+#  queryTokenizer: Bloodhound.tokenizers.whitespace
+#  #prefetch: '/timezones.json'
+#  #local: timezones
+timezoneSource = (q, callback) ->
+  callback(timezone for timezone in timezones when 0 <= timezone.toLowerCase().indexOf q.toLowerCase())
+
+Template.timezoneSelector.onCreated ->
+  Meteor.http.get '/timezones.json', (error, result) ->
+    return console.error "Failed to load timezones: #{error}" if error
+    timezones = JSON.parse result.content
+    console.log "Loaded #{timezones.length} timezones."
+
+Template.timezoneSelector.onRendered ->
+  $('.typeahead').typeahead
+    hint: true
+    highlight: true
+    minLength: 1
+  ,
+    name: 'timezones'
+    limit: 50
+    source: timezoneSource
+    templates: notFound: '<i style="margin: 0ex 1em">No matching timezones found.</i>'
+  ## Update disabled state now and whenever profile changes
+  @autorun => timezoneEdit null, @
+
+timezoneValid = (zone) ->
+  #canon = timezoneCanon zone
+  #return true if zone == ''
+  #_.any (canon == timezoneCanon goodZone for goodZone in timezones)
+  zone == '' or _.contains timezones, zone
+
+timezoneEdit = (e, t) ->
+  e.preventDefault() if e?
+  e.stopPropagation() if e?
+  zone = t.find('.tt-input').value
+  enable = Template.currentData().timezone != zone and timezoneValid zone
+  t.$('.saveButton').attr 'disabled', not enable
+
+Template.timezoneSelector.events
+  'input .timezone': timezoneEdit
+  'typeahead:select .timezone': timezoneEdit
+  'typeahead:autocomplete .timezone': timezoneEdit
+
+  'click .saveButton': (e, t) ->
+    e.preventDefault()
+    e.stopPropagation()
+    zone = t.find('.tt-input').value
+    return unless timezoneValid zone
+    #t.$('.tt-input').typeahead 'val', zone
+    Meteor.users.update Meteor.userId(),
+      $set: "profile.timezone": zone
+    #, -> Meteor.defer -> timezoneEdit e, t

@@ -1,3 +1,5 @@
+katex = require 'katex'
+
 @availableFormats = ['markdown', 'latex', 'html']
 @mathjaxFormats = availableFormats
 
@@ -112,7 +114,7 @@ boldWeight = 900
   .replace /\\href\s*{([^{}]*)}\s*{((?:[^{}]|{[^{}]*})*)}/g, '<a href="$1">$2</a>'
   ## Now remove comments, stripping newlines from the input.
   comments = (text) ->
-    text = text.replace /%.*$\n?/mg, (match, offset, string) ->
+    text = text.replace /(^|[^\\])%.*$\n?/mg, (match, prefix, offset, string) ->
       if inTag string, offset
         ## Potential unclosed HTML tag: leave alone, but process other
         ## %s on the same line after tag closes.
@@ -122,7 +124,7 @@ boldWeight = 900
         else
           match
       else
-        ''
+        prefix
   tex = comments tex
   ## Paragraph detection must go before any macro expansion (which eat \n's)
   tex = tex.replace /\n\n+/g, '\n\\par\n'
@@ -157,32 +159,35 @@ boldWeight = 900
   .replace /\\textbf\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, """<span style="font-weight: #{boldWeight}">$1</span>"""
   .replace /\\(textrm|textnormal)\s*{((?:[^{}]|{[^{}]*})*)}/g, """<span style="font-family: #{defaultFontFamily}">$2</span>"""
   .replace /\\textsf\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="font-family: sans-serif">$1</span>'
-  .replace /\\texttt\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="font-family: monospace">$1</span>'
+  #.replace /\\texttt\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="font-family: monospace">$1</span>'
+  .replace /\\texttt\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, (match, inner) ->
+    inner = inner.replace /-/g, '&hyphen;'  ## prevent -- coallescing
+    """<span style="font-family: monospace">#{inner}</span>"""
   .replace /\\textsc\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="font-variant: small-caps">$1</span>'
   .replace /\\textsl\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="font-style: oblique">$1</span>'
   loop ## Repeat until done to support overlapping matches, e.g. \rm x \it y
     old = tex
     tex = tex
-    .replace /\\em\b\s*((?:[^{}]|{[^{}]*})*)/g, '<em>$1</em>'
-    .replace /\\itshape\b\s*((?:[^{}]|{[^{}]*})*)/g, '<span style="font-style: italic">$1</span>'
-    .replace /\\upshape\b\s*((?:[^{}]|{[^{}]*})*)/g, '<span style="font-style: normal">$1</span>'
-    .replace /\\lfseries\b\s*((?:[^{}]|{[^{}]*})*)/g, """<span style="font-weight: #{lightWeight}">$1</span>"""
-    .replace /\\mdseries\b\s*((?:[^{}]|{[^{}]*})*)/g, """<span style="font-weight: #{mediumWeight}">$1</span>"""
-    .replace /\\bfseries\b\s*((?:[^{}]|{[^{}]*})*)/g, """<span style="font-weight: #{boldWeight}">$1</span>"""
-    .replace /\\rmfamily\b\s*((?:[^{}]|{[^{}]*})*)/g, """<span style="font-family: #{defaultFontFamily}">$1</span>"""
-    .replace /\\sffamily\b\s*((?:[^{}]|{[^{}]*})*)/g, '<span style="font-family: sans-serif">$1</span>'
-    .replace /\\ttfamily\b\s*((?:[^{}]|{[^{}]*})*)/g, '<span style="font-family: monospace">$1</span>'
-    .replace /\\scshape\b\s*((?:[^{}]|{[^{}]*})*)/g, '<span style="font-variant: small-caps">$1</span>'
-    .replace /\\slshape\b\s*((?:[^{}]|{[^{}]*})*)/g, '<span style="font-style: oblique">$1</span>'
+    .replace /\\em\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<em>$1</em>'
+    .replace /\\itshape\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-style: italic">$1</span>'
+    .replace /\\upshape\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-style: normal">$1</span>'
+    .replace /\\lfseries\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font-weight: #{lightWeight}">$1</span>"""
+    .replace /\\mdseries\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font-weight: #{mediumWeight}">$1</span>"""
+    .replace /\\bfseries\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font-weight: #{boldWeight}">$1</span>"""
+    .replace /\\rmfamily\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font-family: #{defaultFontFamily}">$1</span>"""
+    .replace /\\sffamily\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-family: sans-serif">$1</span>'
+    .replace /\\ttfamily\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-family: monospace">$1</span>'
+    .replace /\\scshape\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-variant: small-caps">$1</span>'
+    .replace /\\slshape\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-style: oblique">$1</span>'
     ## Resetting font commands
-    .replace /\\(?:rm|normalfont)\b\s*((?:[^{}]|{[^{}]*})*)/g, """<span style="font-family: #{defaultFontFamily}; font-style: normal; font-weight: normal; font-variant: normal">$1</span>"""
-    .replace /\\md\b\s*((?:[^{}]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-weight: #{mediumWeight}">$1</span>"""
-    .replace /\\bf\b\s*((?:[^{}]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-weight: #{boldWeight}">$1</span>"""
-    .replace /\\it\b\s*((?:[^{}]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-style: italic">$1</span>"""
-    .replace /\\sl\b\s*((?:[^{}]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-style: oblique">$1</span>"""
-    .replace /\\sf\b\s*((?:[^{}]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-family: sans-serif">$1</span>"""
-    .replace /\\tt\b\s*((?:[^{}]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-family: monospace">$1</span>"""
-    .replace /\\sc\b\s*((?:[^{}]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-variant: small-caps">$1</span>"""
+    .replace /\\(?:rm|normalfont)\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font-family: #{defaultFontFamily}; font-style: normal; font-weight: normal; font-variant: normal">$1</span>"""
+    .replace /\\md\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-weight: #{mediumWeight}">$1</span>"""
+    .replace /\\bf\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-weight: #{boldWeight}">$1</span>"""
+    .replace /\\it\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-style: italic">$1</span>"""
+    .replace /\\sl\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-style: oblique">$1</span>"""
+    .replace /\\sf\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-family: sans-serif">$1</span>"""
+    .replace /\\tt\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-family: monospace">$1</span>"""
+    .replace /\\sc\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-variant: small-caps">$1</span>"""
     break if old == tex
   tex = tex
   .replace /\\(uppercase|MakeTextUppercase)\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="text-transform: uppercase">$2</span>'
@@ -227,6 +232,10 @@ boldWeight = 900
   .replace /\\end\s*{(problem|theorem|conjecture|lemma|corollary|fact|observation|proposition|claim)}/g, '</blockquote>'
   .replace /\\begin\s*{(proof|pf)}(\s*\[([^\]]*)\])?/g, (m, env, x, opt) -> "<b>Proof#{if opt then " (#{opt})" else ''}:</b> "
   .replace /\\end\s*{(proof|pf)}/g, ' <span class="pull-right">&#8718;</span></p><p class="clearfix">'
+  .replace /\\(dots|ldots|textellipsis)\b\s*/g, '&hellip;'
+  .replace /\\textasciitilde\b\s*/g, '&Tilde;'  ## Avoid ~ -> \nbsp
+  .replace /\\textasciicircum\b\s*/g, '&Hat;'
+  .replace /\\textbackslash\b\s*/g, '&backslash;'  ## Avoid \ processing
   .replace /\\"{(.)}/g, '&$1uml;'
   .replace /\\"(.)/g, '&$1uml;'
   .replace /\\'c|\\'{c}/g, '&#263;'
@@ -235,9 +244,11 @@ boldWeight = 900
   .replace /\\'(.)/g, '&$1acute;'
   .replace /\\`{(.)}/g, '&$1grave;'
   .replace /\\`(.)/g, '&$1grave;'
-  .replace /\\^{(.)}/g, '&$1circ;'
-  .replace /\\^(.)/g, '&$1circ;'
+  .replace /\\\^{(.)}/g, '&$1circ;'
+  .replace /\\\^{}/g, '&Hat;'
+  .replace /\\\^(.)/g, '&$1circ;'
   .replace /\\~{(.)}/g, '&$1tilde;'
+  .replace /\\~{}/g, '&tilde;'
   .replace /\\~(.)/g, '&$1tilde;'
   .replace /\\=a|\\={a}/g, '&#257;'
   .replace /\\=e|\\={e}/g, '&#275;'
@@ -256,7 +267,7 @@ boldWeight = 900
   .replace /\\v\s*{a}/g, '&#462;'
   .replace /\\H\s*{o}/g, '&#337;'
   .replace /\\&/g, '&amp;'
-  .replace /\\([${}])/g, '$1'
+  .replace /\\([${}%])/g, '$1'
   .replace /\\\s+/g, ' '
   .replace latexSymbolsRe, (match, offset, string) ->
     if inTag string, offset  ## potential unclosed HTML tag; leave alone
@@ -324,21 +335,29 @@ postprocessLinks = (text) ->
 @escapeRe = (string) ->
   string.replace /[\\^$*+?.()|{}\[\]]/g, "\\$&"
 
-@atRe = '[@\uff20]'  ## FF20 is FULLWIDTH COMMERCIAL AT common in Asian scripts?
-
-postprocessAtMentions = (text) ->
-  return text unless 0 <= text.search ///#{atRe}///
+allUsers = ->
   users = Meteor.users.find {}, fields: username: 1
   .map (user) -> user.username
-  return text unless 0 < users.length
+
+atRePrefix = '[@\uff20]'
+@atRe = (users = allUsers()) ->
+  users = allUsers() unless users?
+  users = [users] unless _.isArray users
   ## Reverse-sort by length to ensure maximum-length match
   ## (to handle when one username is a prefix of another).
-  _.sortBy users, (name) -> -name.length
-  users = (escapeRe user for user in users)
-  text.replace ///#{atRe}(#{users.join '|'})(?!\w)///g, (match, user) ->
-    "@#{linkToAuthor (routeGroup?() ? wildGroup), user}"
+  users = _.sortBy users, (name) -> -name.length
+  users = for user in users
+    user = user.username if user.username?
+    escapeRe user
+  ## FF20 is FULLWIDTH COMMERCIAL AT common in Asian scripts
+  ///#{atRePrefix}(#{users.join '|'})(?!\w)///g
 
-katex = require 'katex'
+postprocessAtMentions = (text) ->
+  return text unless ///#{atRePrefix}///.test text
+  users = allUsers()
+  return text unless 0 < users.length
+  text.replace (atRe users), (match, user) ->
+    "@#{linkToAuthor (routeGroup?() ? wildGroup), user}"
 
 preprocessKaTeX = (text) ->
   math = []
@@ -367,7 +386,6 @@ postprocessKaTeX = (text, math) ->
         throwOnError: false
         macros:
           '\\epsilon': '\\varepsilon'
-      .replace /<math>.*<\/math>/, ''  ## remove MathML
     catch e
       throw e unless e instanceof katex.ParseError
       #console.warn "KaTeX failed to parse $#{content}$: #{e}"
@@ -379,13 +397,30 @@ postprocessKaTeX = (text, math) ->
       .replace /</g, '&lt;'
       .replace />/g, '&gt;'
       out = """<span class="katex-error" title="#{title}">#{latex}</span>"""
-    if punct
-      '<span class="nobr">' + out + punct + '</span>'
+    out += punct
+    if punct and not block.display
+      '<span class="nobr">' + out + '</span>'
     else
       out
 
 formatEither = (isTitle, format, text, leaveTeX = false) ->
   return text unless text?
+
+  ## Search highlighting
+  if Meteor.isClient and Router.current()?.route?.getName() == 'search' and
+     (search = Router.current()?.params?.search)?
+    recurse = (query) ->
+      if (query.title and isTitle) or (query.body and not isTitle)
+        pattern = (query.title ? query.body)
+        unless pattern.$not
+          text = text.replace pattern, '<span class="highlight">$&</span>'
+      for list in [query.$and, query.$or]
+        continue unless list
+        for part in list
+          recurse part
+      null
+    recurse parseSearch search
+
   ## LaTeX format is special because it does its own math preprocessing at a
   ## specific time during its formatting.  Other formats don't touch math.
   if format == 'latex'

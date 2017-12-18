@@ -3,8 +3,7 @@ Template.since.onCreated ->
     setTitle "Since #{Template.currentData()?.since}"
 
 messagesSince = (group, since) ->
-  #console.log parseSince since
-  msgs = Messages.find
+  Messages.find
     group: group
     updated: $gte: parseSince since
     published: $ne: false
@@ -12,13 +11,18 @@ messagesSince = (group, since) ->
     private: $ne: true
   ,
     sort: [['updated', 'asc']]
+
+topMessagesSince = (group, since) ->
+  #console.log parseSince since
+  msgs = messagesSince group, since
   .fetch()
   ## xxx should use default sort, not title sort?
+  ## Sort roots before their descendants via '<'/'>' add-on characters
   msgs = _.sortBy msgs, (msg) ->
     if msg.root
-      titleSort (Messages.findOne(msg.root)?.title ? '')
+      titleSort (Messages.findOne(msg.root)?.title ? '') + '>'
     else
-      titleSort msg.title
+      titleSort (msg.title ? '') + '<'
   ## Form a set of all message IDs in match
   byId = {}
   for msg in msgs
@@ -38,9 +42,9 @@ messagesSince = (group, since) ->
 
 Template.since.helpers
   messages: ->
-    messagesSince @group, @since
+    topMessagesSince @group, @since
   messageCount: ->
-    pluralize messagesSince(@group, @since).length, 'message'
+    pluralize messagesSince(@group, @since).count(), 'message'
   valid: ->
     parseSince(@since)?
   parseSince: ->
