@@ -366,7 +366,6 @@ postprocessKaTeX = (text, math) ->
         displayMode: block.display
         throwOnError: false
         macros:
-          '\\dots': '\\ldots'
           '\\epsilon': '\\varepsilon'
       .replace /<math>.*<\/math>/, ''  ## remove MathML
     catch e
