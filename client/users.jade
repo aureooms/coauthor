@@ -1,5 +1,20 @@
 template(name="users")
-  table.table.table-striped.table-hover.users
+  h3
+    if message
+      | Permissions for thread
+      with messageData
+        |  &ldquo;<a href="{{pathFor 'message' group=group message=_id}}">#{titleOrUntitled}</a>&rdquo; in group &ldquo;<a href="{{pathFor 'group' group=group}}">#{group}</a>&rdquo;
+    else
+      unless wild
+        | Permissions for group &ldquo;<a href="{{pathFor 'group' group=group}}">#{group}</a>&rdquo;
+      else
+        | Global permissions for all groups
+    .links.btn-group.pull-right
+      if groupLink
+        a(href="{{pathFor 'users' group=group}}").btn.btn-warning Edit Group Permissions
+      if wildLink
+        a(href=wildLink).btn.btn-danger Edit Global Permissions
+  table.table.table-striped.table-hover.users.clearfix
     thead
       tr
         th Username
@@ -27,6 +42,12 @@ template(name="users")
           td(data-role="edit") !{editRole}
           td(data-role="super") !{superRole}
           td(data-role="admin") !{adminRole}
+        if partialMember
+          tr.partialMember
+            td(colspan="6")
+              | Partial access to messages:
+              each partialMember
+                |  &bull; <a href="{{pathFor 'users.message' group=group message=_id}}">#{titleOrUntitled}</a>
       if showAnonymous
         tr(data-username="*")
           th
@@ -36,10 +57,6 @@ template(name="users")
           td(data-role="edit") !{anonEditRole}
           td(data-role="super") !{anonSuperRole}
           td(data-role="admin") !{anonAdminRole}
-      if wildLink
-        tr
-          td(colspan='6')
-            a(href=wildHref).btn.btn-warning Edit Global User Permissions
       if showInvitations
         tr
           td(colspan='6')

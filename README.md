@@ -37,6 +37,8 @@ in other fields too.
     <code>\`\`\`multiple lines of code\`\`\`</code>,
     links via `[text](url)`, images via `![caption](url)`,
     lists via `*` or `1.`, tables, etc.
+    Also supports all LaTeX commands listed below that start with a letter
+    (notably, not accents) and math mode.
   * LaTeX, limited.  Beyond extensive math mode support (see below),
     the following features are supported in text mode; feel free to ask
     for more.  `%...`, `\def\macro{...}`, `\let\macro=\mac`, `\protect`,
@@ -53,14 +55,15 @@ in other fields too.
     `\raisebox{amount}{text}`, `\par`,
     `\BY{...}`, `\YEAR{...}`,
     `\chapter`, `\section`, `\subsection`, `\subsubsection`, `\footnote`,
-    `\includegraphics[width/height]{url}`,
+    `\includegraphics[width/height/scale]{url}`,
     `\"`, `\'`, ```\` ```, `\^`, `\~`, `\=`, `\c`, `\v`, `\u`, `\H`,
     `\textasciitilde`, `\textasciicircum`, `\textbackslash`,
     `\textellipsis`, `\dots`, `\ldots`,
-    `\&`, `\$`, `\{`, `\}`, `\%`, ``` `` ```, `''`,
+    `\&`, `\$`, `\{`, `\}`, `\%`, `\#`, ``` `` ```, `''`,
     `~`, `--`, `---`, `{`, `}`, `\\`, `\item`;
     `\begin/\end` for environments `verbatim`, `enumerate`, `itemize`,
-    `equation`, `eqnarray`, `align`,
+    `quote`, `tabular` (basic),
+    `equation`, `eqnarray`, `align`,
     `problem`, `theorem`, `conjecture`, `lemma`, `corollary`, `fact`,
     `observation`, `proposition`, `claim`, `proof`.
   * HTML, sanitized.  The following tags are allowed; feel free to ask for
@@ -72,6 +75,7 @@ in other fields too.
     `<tbody>`, `<tr>`, `<th>`, `<td>`, `<pre>`,
     `<img src/alt/width/height>`, `<video controls>`, `<source src>`;
     attributes `title`, `style`, `class`, `aria-*`.
+    Also supports LaTeX math mode.
 
 * [CodeMirror editor](http://codemirror.net/) supports syntax highlighting,
   block folding, bracket matching, line numbering, light and dark themes,
@@ -79,10 +83,10 @@ in other fields too.
   "regular" keybindings as well as Vim and Emacs keybindings
   (if you've ever needed rectangular selection for e.g. ASCII art).
 
-* Organization by **groups** (intended to correspond to groups of people who
-  meet).  Users can have permission to see and/or post within each
-  group, or at a global level (mainly intended for admins).
-  Admins can edit the permissions of other users via the "Users" button.
+* Messages are organized by **groups** (intended to correspond to groups of
+  people who meet), so it's easy to share material with everyone in the group.
+  But it's also possible to share part of a group (only certain threads)
+  with specific users, for visitors or paper merges etc.
 
 * **Sorting** of threads within a group by title, creator, creation date,
   last update, number of posts, or whether subscribed (by clicking on the
@@ -154,8 +158,9 @@ in other fields too.
   button or dragging a file onto that button.
   File messages can have title and body too; title defaults to the filename.
   Image/video files (including PNG, JPEG, SVG, MP4) are displayed inline.
-  (In the future, they and other visual file types such as PDF will be
-  rendered by some kind of thumbnails.)
+  PDF files are converted to SVG using
+  [pdf.js](https://mozilla.github.io/pdf.js/)
+  and displayed inline, with page-turning buttons.
 
 * Messages can start/be marked **Unpublished** (not yet finished) or
   **Deleted** (mistake / no longer useful).
@@ -189,7 +194,12 @@ in other fields too.
 * **Time travel**: You can drag through history and see past versions.
   In general, there should be good, automatic history tracking of everything.
 
-* **Permissions** for each user in each group (and globally):
+* **Permissions** can be specified for each user at the group level
+  (typical case --- user can access the entire group of messages),
+  at the thread level (user can access only certain threads within group),
+  or at the global level: just click "Users" in the appropriate view.
+  Levels of access:
+
      * read: see the group and read the messages (otherwise invisible)
      * post: create new messages, replies, etc. in the group
      * edit: modify other people's messages

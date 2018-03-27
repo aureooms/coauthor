@@ -37,8 +37,11 @@ switch sharejsEditor
   #$(e.target).parent().dropdown 'toggle'
   $(e.target).parents('.dropdown-menu').first().parent().find('.dropdown-toggle').dropdown 'toggle'
 
-#Template.registerHelper 'titleOrUntitled', ->
-#  titleOrUntitled @
+@routeMessage = ->
+  Router.current()?.params?.message
+
+Template.registerHelper 'titleOrUntitled', ->
+  titleOrUntitled @
 
 Template.registerHelper 'childrenCount', ->
   return 0 unless @children and @children.length > 0
@@ -594,6 +597,51 @@ Template.submessage.helpers
                       "coauthor:#{id}"
             cmDrop e
           editor.setOption 'dragDrop', true
+
+          paste = null
+          editor.on 'paste', (cm, e) ->
+            paste = null
+            if 'text/html' in e.clipboardData.types
+              paste = e.clipboardData.getData 'text/html'
+              .replace /<!--.*?-->/g, ''
+              .replace /<\/?(html|head|body|meta)\b[^<>]*>/ig, ''
+              .replace /<b\s+style="font-weight:\s*normal[^<>]*>([^]*?)<\/b>/ig, '$1'
+              .replace /<span\s+style="([^"]*)"[^<>]*>([^]*?)<\/span>/ig, (match, style, body) ->
+                body = "<i>#{body}</i>" if style.match /font-style:\s*italic/
+                body = "<b>#{body}</b>" if style.match /font-weight:\s*[6789]00/
+                body
+              .replace /(\s+)(<\/i>(<\/b>)?|<\/b>)/, '$2$1'
+              .replace /<(p|li) dir="ltr"/ig, '<$1'
+              .replace /<(\w+[^<>]*) class=("[^"]*"|'[^']*')/ig, '<$1'
+              .replace /<(p|li|ul|pre) style=("[^"]*"|'[^']*')/ig, '<$1'
+              .replace /<\/(p|li)>/ig, ''
+              .replace /(<li[^<>]*>)<p>/ig, '$1'
+              .replace /<(li|ul|\/ul|br|p)\b/ig, '\n$&'
+              .replace /&quot;/ig, '"'
+              if (match = /^\s*<pre[^<>]*>([^]*)<\/pre>\s*$/.exec paste) and
+                 0 > match[1].indexOf '<pre>'
+                ## Treat a single <pre> block (such as pasted from Raw view)
+                ## like a text paste, after parsing basic &chars;
+                paste = match[1]
+                .replace /&lt;/g, '<'
+                .replace /&gt;/g, '>'
+                .replace /&amp;/g, '&'
+                .split /\r\n?|\n/
+              else
+                paste = paste.split /\r\n?|\n/
+                ## Remove blank lines
+                paste = (line for line in paste when line.length)
+            else if 'text/plain' in e.clipboardData.types
+              text = e.clipboardData.getData 'text/plain'
+              if match = parseCoauthorMessageUrl text
+                paste = ["coauthor:#{match.message}"]
+              else if match = parseCoauthorAuthorUrl text
+                paste = ["@#{match.author}"]
+          editor.on 'beforeChange', (cm, change) ->
+            if change.origin == 'paste' and paste?
+              change.text = paste
+              paste = null
+
         when 'ace'
           editor.textInput.getElement().setAttribute 'tabindex', 1 + 20 * ti.count + 19
           #editor.meteorData = @  ## currently not needed, also dunno if works
@@ -651,6 +699,12 @@ Template.submessage.helpers
       "<PRE CLASS='raw'>#{_.escape body}</PRE>"
     else
       formatBody history.format, body
+  file: historify 'file'
+  pdf: ->
+    history = messageHistory.get(@_id) ? @
+    ## Don't run PDF render if in raw mode
+    return if messageRaw.get(@_id) or "pdf" != fileType history.file
+    url: urlToFile history
   formatFile: ->
     history = messageHistory.get(@_id) ? @
     format = formatFile history
@@ -1179,3 +1233,65 @@ Template.messageParentConfirm.events
     e.preventDefault()
     e.stopPropagation()
     Modal.hide()
+
+Template.messagePDF.onCreated ->
+  @page = new ReactiveVar 1
+  @pages = new ReactiveVar 1
+
+Template.messagePDF.onRendered ->
+  container = @find 'div.pdf'
+  window.addEventListener 'resize', => @resize?()
+  `import('pdfjs-dist')`.then (pdfjs) =>
+    pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js'  ## in /public
+    @autorun =>
+      pdfjs.getDocument(Template.currentData().url).then (pdf) =>
+        @pages.set pdf.numPages
+        @renderPage = =>
+          pdf.getPage(@page.get()).then (page) =>
+            viewport = page.getViewport 1
+            @resize = ->
+              ## Simulate width: 100%
+              width = container.parentElement.clientWidth
+              height = width * viewport.height / viewport.width
+              ## Simulate max-height: 100vh
+              if height > window.innerHeight
+                height = window.innerHeight
+                width = height * viewport.width / viewport.height
+              container.style.width = "#{width}px"
+              container.style.height = "#{height}px"
+            @resize()
+            page.getOperatorList().then (opList) ->
+              svgGfx = new pdfjs.SVGGraphics page.commonObjs, page.objs
+              svgGfx.getSVG opList, viewport
+              .then (svg) ->
+                #svg.preserveAspectRatio = true
+                container.innerHTML = ''
+                container.appendChild svg
+            #canvas = @find 'div.pdf'
+            #viewport = page.getViewport width / viewport.width
+            #page.render
+            #  canvasContext: canvas.getContext '2d'
+            #  viewport: viewport
+            #.then ->
+        @renderPage()
+
+Template.messagePDF.helpers
+  multiplePages: -> Template.instance().pages.get() > 1
+  page: -> Template.instance().page.get()
+  pages: -> Template.instance().pages.get()
+  disablePrev: ->
+    if Template.instance().page.get() <= 1
+      'disabled'
+  disableNext: ->
+    if Template.instance().page.get() >= Template.instance().pages.get()
+      'disabled'
+
+Template.messagePDF.events
+  'click .prevPage': (e, t) ->
+    if t.page.get() > 1
+      t.page.set t.page.get() - 1
+      t.renderPage?()
+  'click .nextPage': (e, t) ->
+    if t.page.get() < t.pages.get()
+      t.page.set t.page.get() + 1
+      t.renderPage?()

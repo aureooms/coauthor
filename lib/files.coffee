@@ -90,12 +90,15 @@ if Meteor.isServer
 
 @fileType = (file) ->
   file = findFile file unless file.contentType?
-  if file?.contentType in ['image/gif', 'image/jpeg', 'image/png', 'image/svg+xml', 'image/webp', 'image/x-icon']
-    'image'
-  else if file?.contentType in ['video/mp4', 'video/ogg', 'video/webm']
-    'video'
-  else
-    'unknown'
+  switch file?.contentType
+    when 'image/gif', 'image/jpeg', 'image/png', 'image/svg+xml', 'image/webp', 'image/x-icon'
+      'image'
+    when 'video/mp4', 'video/ogg', 'video/webm'
+      'video'
+    when 'application/pdf'
+      'pdf'
+    else
+      'unknown'
 
 if Meteor.isServer
   @readableFiles = (userid) ->
@@ -103,12 +106,12 @@ if Meteor.isServer
       'metadata._Resumable': $exists: false
       #$or:
       #  'metadata.updator': @userId
-      'metadata.group': $in: readableGroupNames userid
+      'metadata.group': $in: accessibleGroupNames userid
 
   Meteor.publish 'files', (group) ->
     check group, String
     @autorun ->
-      if groupRoleCheck group, 'read', findUser @userId
+      if memberOfGroup group, findUser @userId
         Files.find
           'metadata._Resumable': $exists: false
           'metadata.group': group
@@ -121,12 +124,12 @@ if Meteor.isServer
       check file.metadata,
         group: Match.Optional String
       file.metadata.uploader = userId
-      groupRoleCheck file.metadata.group ? wildGroup, 'post', findUser userId
+      memberOfGroup file.metadata.group ? wildGroup, findUser userId
     remove: (userId, file) ->
       file.metadata?.uploader in [userId, null]
     read: (userId, file) ->
       file.metadata?.uploader in [userId, null] or
-      groupRoleCheck file.metadata?.group, 'read', findUser userId
+      memberOfGroup file.metadata?.group, findUser userId
     write: (userId, file, fields) ->
       file.metadata?.uploader in [userId, null]
 else

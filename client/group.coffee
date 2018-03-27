@@ -1,5 +1,5 @@
 @routeGroupRoute = ->
-  Router.current().params.group
+  Router.current()?.params?.group
 
 @routeGroup = ->
   group = routeGroupRoute()
@@ -46,10 +46,7 @@ Template.registerHelper 'groups', ->
   Groups.find {},
     sort: [['name', 'asc']]
 
-Template.registerHelper 'groupCount', ->
-  Groups.find().count()
-
-Template.registerHelper 'admin', -> canAdmin @group ? routeGroup()
+Template.registerHelper 'admin', -> canAdmin routeGroup(), routeMessage()
 
 Template.registerHelper 'canImport', -> canImport @group ? routeGroup()
 
@@ -64,6 +61,8 @@ Template.group.onCreated ->
 Template.group.helpers
   topMessageCount: ->
     pluralize(groupSortedBy(@group, null).count(), 'message thread')
+  groupTags: ->
+    groupTags @group
   members: ->
     members =
       for member in sortedGroupMembers @group

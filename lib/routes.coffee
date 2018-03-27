@@ -54,6 +54,7 @@ Router.route '/:group',
   subscriptions: -> [
     Subscribe.subscribe 'messages.root', @params.group
     Subscribe.subscribe 'groups.members', @params.group
+    Subscribe.subscribe 'tags', @params.group
   ]
   data: ->
     group: @params.group
@@ -65,6 +66,7 @@ Router.route '/:group/+:sortBy?',
   subscriptions: -> [
     Subscribe.subscribe 'messages.root', @params.group
     Subscribe.subscribe 'groups.members', @params.group
+    Subscribe.subscribe 'tags', @params.group
   ]
   data: ->
     group: @params.group
@@ -76,6 +78,7 @@ Router.route '/:group/-:sortBy?',
   subscriptions: -> [
     Subscribe.subscribe 'messages.root', @params.group
     Subscribe.subscribe 'groups.members', @params.group
+    Subscribe.subscribe 'tags', @params.group
   ]
   data: ->
     group: @params.group
@@ -166,9 +169,22 @@ Router.route '/:group/users',
   name: 'users'
   subscriptions: -> [
     Subscribe.subscribe 'users', @params.group
+    Subscribe.subscribe 'messages.root', @params.group  ## for title link
   ]
   data: ->
     group: @params.group
+  fastRender: true
+
+Router.route '/:group/users/:message',
+  name: 'users.message'
+  template: 'users'
+  subscriptions: -> [
+    Subscribe.subscribe 'users', @params.group
+    Subscribe.subscribe 'messages.root', @params.group  ## for partial access links
+  ]
+  data: ->
+    group: @params.group
+    message: @params.message
   fastRender: true
 
 Router.route '/:group/settings',

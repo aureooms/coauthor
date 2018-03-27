@@ -76,7 +76,7 @@ replaceMathBlocks = (text, replacer) ->
   else
     text
 
-inTag = (string, offset) ->
+@inTag = (string, offset) ->
   open = string.lastIndexOf '<', offset
   if open >= 0
     close = string.lastIndexOf '>', offset
@@ -104,30 +104,32 @@ lightWeight = 300
 mediumWeight = 700
 boldWeight = 900
 
-@latex2html = (tex) ->
-  ## Parse verbatim first (to avoid contents getting mangled by other parsing).
-  tex = tex.replace /\\begin\s*{verbatim}([^]*?)\\end\s*{verbatim}/g,
+## Convert verbatim environment, \url, and \href commands to HTML.
+## These are special (and generally must happen first) because they can have
+## special LaTeX characters that should not be treated specially
+## (e.g. % should not be a comment when in a URL or verbatim).
+latex2htmlVerb = (tex) ->
+  tex.replace /\\begin\s*{verbatim}([^]*?)\\end\s*{verbatim}/g,
     (match, verb) -> "<pre>#{latexEscape verb}</pre>"
-  ## Also parse URLs first, to allow for weird characters in URLs (e.g. %)
-  tex = tex.replace /\\url\s*{([^{}]*)}/g, (match, url) ->
+  .replace /\\url\s*{([^{}]*)}/g, (match, url) ->
     """<a href="#{url}">#{latexEscape url}</a>"""
   .replace /\\href\s*{([^{}]*)}\s*{((?:[^{}]|{[^{}]*})*)}/g, '<a href="$1">$2</a>'
-  ## Now remove comments, stripping newlines from the input.
-  comments = (text) ->
-    text = text.replace /(^|[^\\])%.*$\n?/mg, (match, prefix, offset, string) ->
-      if inTag string, offset
-        ## Potential unclosed HTML tag: leave alone, but process other
-        ## %s on the same line after tag closes.
-        close = match.indexOf '>'
-        if close >= 0
-          match[..close] + comments match[close+1..]
-        else
-          match
+
+## Remove comments, stripping newlines from the input.
+latexStripComments = (text) ->
+  text.replace /(^|[^\\])%.*$\n?/mg, (match, prefix, offset, string) ->
+    if inTag string, offset
+      ## Potential unclosed HTML tag: leave alone, but process other
+      ## %s on the same line after tag closes.
+      close = match.indexOf '>'
+      if close >= 0
+        match[..close] + latexStripComments match[close+1..]
       else
-        prefix
-  tex = comments tex
-  ## Paragraph detection must go before any macro expansion (which eat \n's)
-  tex = tex.replace /\n\n+/g, '\n\\par\n'
+        match
+    else
+      prefix
+
+latex2htmlDef = (tex) ->
   ## Process \def and \let, and expand all macros.
   defs = {}
   tex = tex.replace /\\def\s*\\([a-zA-Z]+)\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, (match, p1, p2) ->
@@ -142,12 +144,13 @@ boldWeight = 900
     r = ///\\(#{_.keys(defs).join '|'})\s*///g
     while 0 <= tex.search(r)
       tex = tex.replace r, (match, def) -> defs[def]
-  ## After \def expansion and verbatim processing, protect math
-  [tex, math] = preprocessKaTeX tex
-  ## Start initial paragraph
-  tex = '<p>' + tex
-  ## Commands
-  tex = tex.replace /\\\\/g, '[DOUBLEBACKSLASH]'
+  tex
+
+## Process all commands starting with \ followed by a letter a-z.
+## This is not a valid escape sequence in Markdown, so can be safely supported
+## in Markdown too.
+latex2htmlCommandsAlpha = (tex, math) ->
+  tex = tex
   .replace /\\(BY|YEAR)\s*{([^{}]*)}/g, '<span style="border: thin solid; margin-left: 0.5em; padding: 0px 4px; font-variant:small-caps">$2</span>'
   .replace /\\protect\b\s*/g, ''
   .replace /\\par\b\s*/g, '<p>'
@@ -200,22 +203,26 @@ boldWeight = 900
   .replace /\\item\b\s*/g, '<li>'
   .replace /\\end\s*{enumerate}/g, '</ol>'
   .replace /\\end\s*{itemize}/g, '</ul>'
-  .replace /\\chapter\s*\*?\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<h1>$1</h1>'
-  .replace /\\section\s*\*?\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<h2>$1</h2>'
-  .replace /\\subsection\s*\*?\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<h3>$1</h3>'
-  .replace /\\subsubsection\s*\*?\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<h4>$1</h4>'
+  .replace /\\chapter\s*\*?\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<h1>$1</h1><p>'
+  .replace /\\section\s*\*?\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<h2>$1</h2><p>'
+  .replace /\\subsection\s*\*?\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<h3>$1</h3><p>'
+  .replace /\\subsubsection\s*\*?\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<h4>$1</h4><p>'
   .replace /\\paragraph\s*\*?\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}\s*/g, '<p><b>$1</b> '
   .replace /\\footnote\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '[$1]'
   .replace /\\includegraphics\s*(\[[^\[\]]*\]\s*)?{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g,
     (match, optional = '', graphic) ->
       style = ''
-      optional.replace /width\s*=\s*([-0-9.]+)\s*([a-zA-Z]*)/g,
+      optional.replace /width\s*=\s*([-0-9.]+)\s*(%|[a-zA-Z]*)/g,
         (match2, value, unit) ->
           style += "width: #{value}#{unit};"
           ''
-      .replace /height\s*=\s*([-0-9.]+)\s*([a-zA-Z]*)/g,
+      .replace /height\s*=\s*([-0-9.]+)\s*(%|[a-zA-Z]*)/g,
         (match2, value, unit) ->
           style += "height: #{value}#{unit};"
+          ''
+      .replace /scale\s*=\s*([-0-9.]+)/g,
+        (match2, value, unit) ->
+          style += "width: #{100 * parseFloat value}%;"
           ''
       style = ' style="' + style + '"' if style
       """<img src="#{graphic}"#{style}>"""
@@ -228,14 +235,72 @@ boldWeight = 900
       else
         value = "-#{value}"
       """<span style="margin-top: #{value}#{unit};">#{arg}</span>"""
-  .replace /\\begin\s*{(problem|theorem|conjecture|lemma|corollary|fact|observation|proposition|claim)}(\s*\[([^\]]*)\])?/g, (m, env, x, opt) -> "<blockquote><b>#{s.capitalize env}#{if opt then " (#{opt})" else ''}:</b> "
+  .replace /\\begin\s*{(problem|theorem|conjecture|lemma|corollary|fact|observation|proposition|claim)}(\s*\[([^\]]*)\])?/g, (m, env, x, opt) -> "<blockquote><p><b>#{s.capitalize env}#{if opt then " (#{opt})" else ''}:</b> "
   .replace /\\end\s*{(problem|theorem|conjecture|lemma|corollary|fact|observation|proposition|claim)}/g, '</blockquote>'
+  .replace /\\begin\s*{(quote)}/g, '<blockquote><p>'
+  .replace /\\end\s*{(quote)}/g, '</blockquote>'
   .replace /\\begin\s*{(proof|pf)}(\s*\[([^\]]*)\])?/g, (m, env, x, opt) -> "<b>Proof#{if opt then " (#{opt})" else ''}:</b> "
   .replace /\\end\s*{(proof|pf)}/g, ' <span class="pull-right">&#8718;</span></p><p class="clearfix">'
+  .replace /\\begin\s*{tabular}\s*{([^{}]*)}([^]*)\\end\s*{tabular}/g, (m, cols, body) ->
+    '<table class="table">' +
+      (for row in body.split /(?:\\\\|\[DOUBLEBACKSLASH\])(?:\s*\\(?:hline|cline\s*{[^{}]*}))?/
+         continue unless row.trim()
+         "<tr>\n" +
+         (for col, x in row.split '&'
+            align =
+              switch cols[x]
+                when 'c'
+                  ' style="text-align: center"'
+                when 'l'
+                  ' style="text-align: left"'
+                when 'r'
+                  ' style="text-align: right"'
+                else
+                  ''
+            "<td#{align}>#{col}</td>\n"
+         ).join('') +
+         "</tr>\n"
+      ).join('') +
+    '</table>'
   .replace /\\(dots|ldots|textellipsis)\b\s*/g, '&hellip;'
   .replace /\\textasciitilde\b\s*/g, '&Tilde;'  ## Avoid ~ -> \nbsp
   .replace /\\textasciicircum\b\s*/g, '&Hat;'
   .replace /\\textbackslash\b\s*/g, '&backslash;'  ## Avoid \ processing
+
+## "Light" LaTeX support, using only commands that start with a letter a-z,
+## so are safe to process in Markdown.  No accent support.
+latex2htmlLight = (tex) ->
+  tex = latex2htmlVerb tex
+  tex = latex2htmlDef tex
+  ## After \def expansion and verbatim processing, protect math
+  [tex, math] = preprocessKaTeX tex
+  tex = latex2htmlCommandsAlpha tex, math
+  [tex, math]
+
+## Full LaTeX support, including all supported commands and symbols
+## (% make comments, ~ makes nonbreaking space, etc.).
+latex2html = (tex) ->
+  tex = latex2htmlVerb tex
+  tex = latexStripComments tex
+  ## Paragraph detection must go before any macro expansion (which eat \n's)
+  tex = tex.replace /\n\n+/g, '\n\\par\n'
+  tex = latex2htmlDef tex
+  ## After \def expansion and verbatim processing, protect math
+  [tex, math] = preprocessKaTeX tex
+  ## Start initial paragraph
+  tex = '<p>' + tex
+  ## Commands
+  tex = tex.replace /\\\\/g, '[DOUBLEBACKSLASH]'
+  tex = latex2htmlCommandsAlpha tex, math
+  .replace /\\c\s*{s}/g, '&#351;'
+  .replace /\\c\s*{z}/g, 'z&#807;'
+  .replace /\\v\s*{C}/g, '&#268;'
+  .replace /\\v\s*{s}/g, '&#353;'
+  .replace /\\v\s*{n}/g, '&#328;'
+  .replace /\\v\s*{r}/g, '&#345;'
+  .replace /\\u\s*{a}/g, '&#259;'
+  .replace /\\v\s*{a}/g, '&#462;'
+  .replace /\\H\s*{o}/g, '&#337;'
   .replace /\\"{(.)}/g, '&$1uml;'
   .replace /\\"(.)/g, '&$1uml;'
   .replace /\\'c|\\'{c}/g, '&#263;'
@@ -257,17 +322,8 @@ boldWeight = 900
   .replace /\\=o|\\={o}/g, '&#333;'
   .replace /\\=u|\\={u}/g, '&#363;'
   .replace /\\=y|\\={y}/g, '&#563;'
-  .replace /\\c\s*{s}/g, '&#351;'
-  .replace /\\c\s*{z}/g, 'z&#807;'
-  .replace /\\v\s*{C}/g, '&#268;'
-  .replace /\\v\s*{s}/g, '&#353;'
-  .replace /\\v\s*{n}/g, '&#328;'
-  .replace /\\v\s*{r}/g, '&#345;'
-  .replace /\\u\s*{a}/g, '&#259;'
-  .replace /\\v\s*{a}/g, '&#462;'
-  .replace /\\H\s*{o}/g, '&#337;'
   .replace /\\&/g, '&amp;'
-  .replace /\\([${}%])/g, '$1'
+  .replace /\\([${}%#])/g, '$1'
   .replace /\\\s+/g, ' '
   .replace latexSymbolsRe, (match, offset, string) ->
     if inTag string, offset  ## potential unclosed HTML tag; leave alone
@@ -276,7 +332,7 @@ boldWeight = 900
       latexSymbols[match]
   .replace /<p>\s*(<h[1-9]>)/g, '$1'
   .replace /<p>(\s*<p>)+/g, '<p>'  ## Remove double paragraph breaks
-  .replace /\[DOUBLEBACKSLASH\]/g, '\\\\'
+  .replace /\[DOUBLEBACKSLASH\]/g, '<br>'
   [tex, math]
 
 @formats =
@@ -287,17 +343,42 @@ boldWeight = 900
     #text = replaceMathBlocks text, (block) ->
     #  block.replace /[\\`*{}\[\]()#+\-.!_]/g, '\\$&'
     #marked.Lexer.rules = {text: /^[^\n]+/} if title
+    ## Support what we can of LaTeX before doing Markdown conversion.
+    [text, math] = latex2htmlLight text
     if title  ## use "single-line" version of Markdown
       text = markdownInline text
     else
       text = markdown text
+    [text, math]
   latex: (text, title) ->
     latex2html text
   html: (text, title) ->
-    text
+    linkify text
 
 @coauthorLinkBodyRe = "/?/?([a-zA-Z0-9]+)"
 @coauthorLinkRe = "coauthor:#{coauthorLinkBodyRe}"
+
+@parseCoauthorMessageUrl = (url) ->
+  match = new RegExp("^#{urlFor 'message',
+    group: '(.*)'
+    message: '(.*)'
+    0: '*'
+    1: '*'
+  }$").exec url
+  if match?
+    group: match[1]
+    message: match[2]
+
+@parseCoauthorAuthorUrl = (url) ->
+  match = new RegExp("^#{urlFor 'author',
+    group: '(.*)'
+    author: '(.*)'
+    0: '*'
+    1: '*'
+  }$").exec url
+  if match?
+    group: match[1]
+    author: match[2]
 
 postprocessCoauthorLinks = (text) ->
   text.replace ///(<img\s[^<>]*src\s*=\s*['"])#{coauthorLinkRe}///ig,
@@ -403,10 +484,8 @@ postprocessKaTeX = (text, math) ->
     else
       out
 
-formatEither = (isTitle, format, text, leaveTeX = false) ->
-  return text unless text?
-
-  ## Search highlighting
+## Search highlighting
+formatSearch = (isTitle, text) ->
   if Meteor.isClient and Router.current()?.route?.getName() == 'search' and
      (search = Router.current()?.params?.search)?
     recurse = (query) ->
@@ -420,10 +499,16 @@ formatEither = (isTitle, format, text, leaveTeX = false) ->
           recurse part
       null
     recurse parseSearch search
+  text
 
-  ## LaTeX format is special because it does its own math preprocessing at a
-  ## specific time during its formatting.  Other formats don't touch math.
-  if format == 'latex'
+formatEither = (isTitle, format, text, leaveTeX = false) ->
+  return text unless text?
+  text = formatSearch isTitle, text
+
+  ## LaTeX and Markdown formats are special because they do their own math
+  ## preprocessing at a specific time during its formatting.  Other formats
+  ## (currently just HTML) don't touch math, so we need to preprocess here.
+  if format in ['latex', 'markdown']
     [text, math] = formats[format] text, isTitle
   else
     [text, math] = preprocessKaTeX text
@@ -434,22 +519,39 @@ formatEither = (isTitle, format, text, leaveTeX = false) ->
   ## Remove surrounding <P> block caused by Markdown and LaTeX formatters.
   if isTitle
     text = text
-    .replace /^\s*<P>\s*/i, ''
-    .replace /\s*<\/P>\s*$/i, ''
+    .replace /^\s*<p>\s*/i, ''
+    .replace /\s*<\/p>\s*$/i, ''
   if leaveTeX
     text = putMathBack text, math
   else
     text = postprocessKaTeX text, math
+  text = linkify text  ## Extra support for links, unliked LaTeX
   text = postprocessCoauthorLinks text
   text = postprocessLinks text
   text = postprocessAtMentions text
   sanitize text
 
+formatEitherSafe = (isTitle, format, text, leaveTeX = false) ->
+  try
+    formatEither isTitle, format, text, leaveTeX
+  catch e
+    console.error e.stack ? e.toString()
+    if isTitle
+      """
+        <span class="label label-danger">Formatting error (bug in Coauthor)</span>
+        <code>#{_.escape text}</code>
+      """
+    else
+      """
+        <div class="alert alert-danger">Formatting error (bug in Coauthor): #{e.toString()}</div>
+        <pre>#{_.escape text}</pre>
+      """
+
 @formatBody = (format, body, leaveTeX = false) ->
-  formatEither false, format, body, leaveTeX
+  formatEitherSafe false, format, body, leaveTeX
 
 @formatTitle = (format, title, leaveTeX = false) ->
-  formatEither true, format, title, leaveTeX
+  formatEitherSafe true, format, title, leaveTeX
 
 @formatBadFile = (fileId) ->
   """<i class="bad-file">&lt;unknown file with ID #{fileId}&gt;</i>"""

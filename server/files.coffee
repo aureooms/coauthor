@@ -3,6 +3,8 @@ url = require 'url'
 
 fileRe = /^\/(\w+)$/
 
+defaultContentType = 'application/octet-stream'
+
 ## Mimicking vsivsi:file-collection http_access_server.coffee
 WebApp.rawConnectHandlers.use '/file',
   Meteor.bindEnvironment (req, res, next) ->
@@ -31,10 +33,11 @@ WebApp.rawConnectHandlers.use '/file',
       fields:
         group: true
         file: true
+        root: true  ## for messageRoleCheck
     unless msg? and msg.file and (req.gridFS = findFile msg.file)?
       res.writeHead 403
       return res.end "Invalid file message ID: #{match[1]}"
-    unless groupRoleCheck(msg.group, 'read', user) and (msg.group == req.gridFS.metadata.group or groupRoleCheck req.gridFS.metadata.group, 'read', user)
+    unless messageRoleCheck(msg.group, msg, 'read', user) and (msg.group == req.gridFS.metadata.group or groupRoleCheck req.gridFS.metadata.group, 'read', user)
       res.writeHead 401
       return res.end "Lack read permissions for group of message/file #{match[1]}"
 
@@ -75,7 +78,7 @@ WebApp.rawConnectHandlers.use '/file',
       headers['Last-Modified'] = req.gridFS.uploadDate.toUTCString()
       unless req.method is 'HEAD'
         stream = Files.findOneStream { _id: req.gridFS._id }
-    headers['Content-Type'] = req.gridFS.contentType
+    headers['Content-Type'] = req.gridFS.contentType or defaultContentType
     filename = encodeURIComponent(req.query.filename ? req.gridFS.filename)
     headers['Content-Disposition'] = "inline; filename=\"#{filename}\"; filename*=UTF-8''#{filename}"
     if (req.query.download and req.query.download.toLowerCase() == 'true') or req.query.filename

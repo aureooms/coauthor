@@ -246,12 +246,15 @@ importLaTeX = (group, zip) ->
       console.log match[0] unless title
       title = title[1][1...-1].replace /[{}]/g, ''
       year = /\byear\s*=\s*("(?:{[^{}]*}|[^"])*"|{(?:[^{}]|{[^{}]*})*}|\d+)/i.exec match[0]
-      year = year[1].replace /["{}]/g, ''
+      if year?
+        year = year[1].replace /["{}]/g, ''
+      else
+        console.warn match[1], 'has no year'
       if author.length <= 1
         abbrev = /([^{}]|{[^{}]*}){1,3}/.exec(lastName author[0])[0].replace /[{}]/g, ''
       else
         abbrev = (lastName(auth)[0] for auth in author).join ''
-      abbrev += year[-2..]
+      abbrev += year[-2..] if year?
       console.log match[1], '=', abbrev, '=', author.join(' & '), year, '=', match[2][1...-1]
       bibs[match[1]] =
         author: author
@@ -294,7 +297,7 @@ importLaTeX = (group, zip) ->
     graphics = []
     text.replace /\\includegraphics\s*(\[[^\[\]]*\]\s*)?{((?:[^{}]|{[^{}]*})*)}/g,
       (match, optional, filename) ->
-        if optional.match /page\s*=/
+        if optional?.match /page\s*=/
           console.warn 'Import does not support \\includegraphics[page=...]'
         graphics.push
           filename: filename
@@ -379,8 +382,9 @@ importLaTeX = (group, zip) ->
     ## Remove comments (to ignore \sections inside comments),
     ## and remove figures (already processed).
     tex = tex
-    .replace /%.*$\n?/mg, ''
+    .replace /(^|[^\\])%.*$\n?/mg, '$1'
     .replace /\\begin\s*{(wrap)?figure}[^]*?\\end\s*{(wrap)?figure}\s*/g, ''
+    .replace /\\hspace\*?\s*{0pt}/g, ''  ## used to place wrapfigures
     tex = processCites tex
     depths = []
     start = null

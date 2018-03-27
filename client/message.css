@@ -4,7 +4,10 @@
 .title { font-weight: bold; vertical-align: middle; }
 input.title { width: 100%; }
 .author { font-style: italic; }
-.message-body { text-align: justify; }
+.message-body { text-align: justify; position: relative; }
+  /* We set position: relative so any position: absolute's within have
+   * this as the containing block.
+   */
 .message-footer { width: 100%; padding: 0ex 1em; }
 .panel-body { padding-bottom: 0px; } /* always have a footer right below */
 .message-deleted > .message-body, .message-unpublished > .message-body { opacity: 0.6; }
@@ -47,6 +50,8 @@ input.title ~ .message-right-buttons { margin: 0px; }
 .dropdown-menu.actionMenu > li > a:hover { min-width: 100px; background: white; }
 
 img, video { max-width: 100%; max-height: 100vh; }
+.pdfBox { width: 100%; }
+.pdf > svg { width: 100%; height: auto; }
 
 .historySlider { margin-left: 5em; margin-right: 5em; }
 .slider.slider-horizontal { width: 100%; }
