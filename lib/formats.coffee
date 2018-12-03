@@ -1,4 +1,5 @@
 katex = require 'katex'
+katex.__defineMacro '\\epsilon', '\\varepsilon'
 
 @availableFormats = ['markdown', 'latex', 'html']
 @mathjaxFormats = availableFormats
@@ -16,19 +17,20 @@ if Meteor.isClient
 replaceMathBlocks = (text, replacer) ->
   #console.log text
   blocks = []
-  re = /[{}]|\$\$?|\\(begin|end)\s*{(equation|eqnarray|align)\*?}|\\./g
+  re = /[{}]|\$\$?|\\(begin|end)\s*{(equation|eqnarray|align)\*?}|(\\par\b|\n[ \f\r\t\v]*\n\s*)|\\./g
   block = null
   startBlock = (b) ->
     block = b
     block.start = match.index
     block.contentStart = match.index + match[0].length
-  endBlock = ->
+  endBlock = (skipThisToken) ->
     block.content = text[block.contentStart...match.index]
     delete block.contentStart  ## no longer needed
     ## Simulate \begin{align}...\end{align} with \begin{aligned}...\end{aligned}
     if block.environment and block.environment in ['eqnarray', 'align']
       block.content = "\\begin{aligned}#{block.content}\\end{aligned}"
-    block.end = match.index + match[0].length
+    block.end = match.index
+    block.end += match[0].length unless skipThisToken
     block.all = text[block.start...block.end]
     blocks.push block
     block = null
@@ -57,7 +59,11 @@ replaceMathBlocks = (text, replacer) ->
         braces -= 1
         braces = 0 if braces < 0  ## ignore extra }s
       else
-        if match[1] == 'begin' and not block?
+        if match[3]  ## paragraph break
+          if block? #and not block.display
+            console.warn "Paragraph break within math block; auto-closing math (as LaTeX would)"
+            endBlock true  ## don't include paragraph break in math block
+        else if match[1] == 'begin' and not block?
           startBlock
             display: true
             environment: match[2]
@@ -167,7 +173,7 @@ latex2htmlCommandsAlpha = (tex, math) ->
     inner = inner.replace /-/g, '&hyphen;'  ## prevent -- coallescing
     """<span style="font-family: monospace">#{inner}</span>"""
   .replace /\\textsc\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="font-variant: small-caps">$1</span>'
-  .replace /\\textsl\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="font-style: oblique">$1</span>'
+  .replace /\\textsl\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<i class="slant">$1</i>'
   loop ## Repeat until done to support overlapping matches, e.g. \rm x \it y
     old = tex
     tex = tex
@@ -182,6 +188,18 @@ latex2htmlCommandsAlpha = (tex, math) ->
     .replace /\\ttfamily\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-family: monospace">$1</span>'
     .replace /\\scshape\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-variant: small-caps">$1</span>'
     .replace /\\slshape\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-style: oblique">$1</span>'
+    ## Font size commands.  Bootstrap defines base font-size as 14px.
+    ## We multiply this by a scale factor defined by LaTeX's 10pt sizing chart
+    ## [https://en.wikibooks.org/wiki/LaTeX/Fonts].
+    .replace /\\tiny\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-size: 7px">$1</span>'
+    .replace /\\scriptsize\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-size: 9.8px">$1</span>'
+    .replace /\\footnotesize\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-size: 11.2px">$1</span>'
+    .replace /\\small\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-size: 12.6px">$1</span>'
+    .replace /\\large\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-size: 16.8px">$1</span>'
+    .replace /\\Large\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-size: 20.2px">$1</span>'
+    .replace /\\LARGE\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-size: 24.2px">$1</span>'
+    .replace /\\huge\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-size: 29px">$1</span>'
+    .replace /\\Huge\b\s*((?:[^{}<>]|{[^{}]*})*)/g, '<span style="font-size: 34.8px">$1</span>'
     ## Resetting font commands
     .replace /\\(?:rm|normalfont)\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font-family: #{defaultFontFamily}; font-style: normal; font-weight: normal; font-variant: normal">$1</span>"""
     .replace /\\md\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-weight: #{mediumWeight}">$1</span>"""
@@ -235,8 +253,8 @@ latex2htmlCommandsAlpha = (tex, math) ->
       else
         value = "-#{value}"
       """<span style="margin-top: #{value}#{unit};">#{arg}</span>"""
-  .replace /\\begin\s*{(problem|theorem|conjecture|lemma|corollary|fact|observation|proposition|claim)}(\s*\[([^\]]*)\])?/g, (m, env, x, opt) -> "<blockquote><p><b>#{s.capitalize env}#{if opt then " (#{opt})" else ''}:</b> "
-  .replace /\\end\s*{(problem|theorem|conjecture|lemma|corollary|fact|observation|proposition|claim)}/g, '</blockquote>'
+  .replace /\\begin\s*{(problem|question|idea|theorem|conjecture|lemma|corollary|fact|observation|proposition|claim|definition)}(\s*\[([^\]]*)\])?/g, (m, env, x, opt) -> "<blockquote><p><b>#{s.capitalize env}#{if opt then " (#{opt})" else ''}:</b> "
+  .replace /\\end\s*{(problem|question|idea|theorem|conjecture|lemma|corollary|fact|observation|proposition|claim|definition)}/g, '</blockquote>'
   .replace /\\begin\s*{(quote)}/g, '<blockquote><p>'
   .replace /\\end\s*{(quote)}/g, '</blockquote>'
   .replace /\\begin\s*{(proof|pf)}(\s*\[([^\]]*)\])?/g, (m, env, x, opt) -> "<b>Proof#{if opt then " (#{opt})" else ''}:</b> "
@@ -262,6 +280,10 @@ latex2htmlCommandsAlpha = (tex, math) ->
          "</tr>\n"
       ).join('') +
     '</table>'
+  .replace /\\bigskip\b\s*/g, '<div style="padding-top:12pt;"></div>\n'
+  .replace /\\medskip\b\s*/g, '<div style="padding-top:6pt;"></div>\n'
+  .replace /\\smallskip\b\s*/g, '<div style="padding-top:3pt;"></div>\n'
+  .replace /\\noindent\b\s*/g, ''  ## Irrelevant commands
   .replace /\\(dots|ldots|textellipsis)\b\s*/g, '&hellip;'
   .replace /\\textasciitilde\b\s*/g, '&Tilde;'  ## Avoid ~ -> \nbsp
   .replace /\\textasciicircum\b\s*/g, '&Hat;'
@@ -356,7 +378,9 @@ latex2html = (tex) ->
     linkify text
 
 @coauthorLinkBodyRe = "/?/?([a-zA-Z0-9]+)"
+@coauthorLinkBodyHashRe = "#{coauthorLinkBodyRe}(#[a-zA-Z0-9]*)?"
 @coauthorLinkRe = "coauthor:#{coauthorLinkBodyRe}"
+@coauthorLinkHashRe = "coauthor:#{coauthorLinkBodyHashRe}"
 
 @parseCoauthorMessageUrl = (url) ->
   match = new RegExp("^#{urlFor 'message',
@@ -382,25 +406,54 @@ latex2html = (tex) ->
 
 postprocessCoauthorLinks = (text) ->
   text.replace ///(<img\s[^<>]*src\s*=\s*['"])#{coauthorLinkRe}///ig,
-    (match, p1, p2) ->
-      p1 + urlToFile p2
-      #msg = Messages.findOne p2
+    (match, html, id) ->
+      html + urlToFile id
+      #msg = Messages.findOne id
       #if msg? and msg.file
-      #  p1 + urlToFile msg
+      #  html + urlToFile msg
       #else
       #  if msg?
-      #    console.warn "Couldn't detect image in message #{p2} -- must be text?"
+      #    console.warn "Couldn't detect image in message #{id} -- must be text?"
       #  else
-      #    console.warn "Couldn't find group for message #{p2} (likely subscription issue)"
+      #    console.warn "Couldn't find group for message #{id} (likely subscription issue)"
       #  match
-  .replace ///(<a\s[^<>]*href\s*=\s*['"])#{coauthorLinkRe}///ig,
-    (match, p1, p2) ->
-      ## xxx Could add msg.title, when available, to hover text...
-      ## xxx Currently assuming message is in same group if can't find it.
-      msg = Messages.findOne p2
-      p1 + urlFor 'message',
-        group: msg?.group or routeGroup?() or wildGroup
-        message: p2
+  .replace ///(<a\s[^<>]*href\s*=\s*['"])#{coauthorLinkHashRe}///ig,
+    (match, html, id, hash) ->
+      ## xxx Should we subscribe to the linked message when we can't find it?
+      ## (This would just be to get its title, so maybe not worth it.)
+      msg = Messages.findOne id
+      if msg?.title
+        html = """<a title="#{msg.title.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"" href=#{html[html.length-1]}"""
+      html + urlFor('message',
+        group: msg?.group or wildGroup
+        message: id
+      ) + (hash ? '')
+  .replace ///(<img\s[^<>]*src\s*=\s*['"])(#{fileUrlPattern}[^'"]*)(['"][^<>]*>)///ig,
+    (match, prefix, url, isFile, isInternalFile, suffix) ->
+      if isFile
+        msg = findMessage url2file url
+        return match unless msg?
+        fileId = msg.file
+      else
+        fileId = url2internalFile url
+      file = findFile fileId
+      return match unless file?
+      switch fileType file
+        when 'video'
+          formatVideo file, url
+        when 'pdf'
+          template = Template?.instance?()
+          if template?
+            id = Random.id()
+            Meteor.defer =>
+              parent = template.find """div[data-id="#{id}"]"""
+              return unless parent?
+              Blaze.renderWithData Template.messagePDF, fileId, parent
+            """<div data-id="#{id}"></div>"""
+          else  ## e.g. server has no templates
+            match
+        else
+          match
 
 ## URL regular expression with scheme:// required, to avoid extraneous matching
 @urlRe = /\w+:\/\/[-\w~!$&'()*+,;=.:@%#?\/]+/g
@@ -412,9 +465,6 @@ postprocessLinks = (text) ->
     else
       match.replace /\/+/g, (slash) ->
         "#{slash}&#8203;"  ## Add zero-width space after every slash group
-
-@escapeRe = (string) ->
-  string.replace /[\\^$*+?.()|{}\[\]]/g, "\\$&"
 
 allUsers = ->
   users = Meteor.users.find {}, fields: username: 1
@@ -429,7 +479,7 @@ atRePrefix = '[@\uff20]'
   users = _.sortBy users, (name) -> -name.length
   users = for user in users
     user = user.username if user.username?
-    escapeRe user
+    escapeRegExp user
   ## FF20 is FULLWIDTH COMMERCIAL AT common in Asian scripts
   ///#{atRePrefix}(#{users.join '|'})(?!\w)///g
 
@@ -454,6 +504,7 @@ putMathBack = (tex, math) ->
   tex.replace /MATH(\d+)ENDMATH/g, (match, id) -> math[id].all
 
 postprocessKaTeX = (text, math) ->
+  macros = {}  ## shared across multiple math expressions within same body
   text.replace /MATH(\d+)ENDMATH([,.!?:;'"\-)\]}]*)/g, (match, id, punct) ->
     block = math[id]
     content = block.content
@@ -465,8 +516,7 @@ postprocessKaTeX = (text, math) ->
       out = katex.renderToString content,
         displayMode: block.display
         throwOnError: false
-        macros:
-          '\\epsilon': '\\varepsilon'
+        macros: macros
     catch e
       throw e unless e instanceof katex.ParseError
       #console.warn "KaTeX failed to parse $#{content}$: #{e}"
@@ -556,19 +606,38 @@ formatEitherSafe = (isTitle, format, text, leaveTeX = false) ->
 @formatBadFile = (fileId) ->
   """<i class="bad-file">&lt;unknown file with ID #{fileId}&gt;</i>"""
 
+###
+vsivsi:file-collection creates an initial file of zero length; see
+share.insert_func in
+  https://github.com/vsivsi/meteor-file-collection/blob/master/src/gridFS.coffee
+After upload (which is forbidden to take a zero-length file), the file
+length gets set correctly; see the end of resumable_post_handler in
+  https://github.com/vsivsi/meteor-file-collection/blob/master/src/resumable_server.coffee
+We therefore don't display any file that is still in the zero-length state.
+###
+@formatEmptyFile = (fileId) ->
+  """<i class="empty-file">(uploading file...)</i>"""
+
 @formatFileDescription = (msg, file = null) ->
   file = findFile msg.file unless file?
   return formatBadFile msg.file unless file?
   """<i class="odd-file"><a href="#{urlToFile msg}">&lt;#{s.numberFormat file.length}-byte #{file.contentType} file &ldquo;#{file.filename}&rdquo;&gt;</a></i>"""
 
+@formatVideo = (file, url) ->
+  if file?.contentType
+    """<video controls><source src="#{url}" type="#{file.contentType}"></video>"""
+  else
+    """<video controls><source src="#{url}"></video>"""
+
 @formatFile = (msg, file = null) ->
   file = findFile msg.file unless file?
   return formatBadFile msg.file unless file?
+  return formatEmptyFile msg.file unless file.length
   switch fileType file
     when 'image'
       """<img src="#{urlToFile msg}">"""
     when 'video'
-      """<video controls><source src="#{urlToFile msg}" type="#{file.contentType}"></video>"""
+      formatVideo file, urlToFile msg
     else  ## 'unknown'
       formatFileDescription msg, file
 

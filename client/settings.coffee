@@ -181,7 +181,8 @@ timezones = []
 #  #prefetch: '/timezones.json'
 #  #local: timezones
 timezoneSource = (q, callback) ->
-  callback(timezone for timezone in timezones when 0 <= timezone.toLowerCase().indexOf q.toLowerCase())
+  re = new RegExp (escapeRegExp q).replace(/[ _]/g, '[ _]'), 'i'
+  callback(timezone for timezone in timezones when timezone.match re)
 
 Template.timezoneSelector.onCreated ->
   Meteor.http.get '/timezones.json', (error, result) ->
@@ -217,10 +218,14 @@ timezoneEdit = (e, t) ->
 
 Template.timezoneSelector.events
   'input .timezone': timezoneEdit
-  'typeahead:select .timezone': timezoneEdit
   'typeahead:autocomplete .timezone': timezoneEdit
+  'typeahead:cursorchange .timezone': timezoneEdit
+  'typeahead:select .timezone': (e, t) ->
+    timezoneEdit e, t
+    unless t.$('.saveButton').attr 'disabled'
+      timezoneSave e, t
 
-  'click .saveButton': (e, t) ->
+  'click .saveButton': timezoneSave = (e, t) ->
     e.preventDefault()
     e.stopPropagation()
     zone = t.find('.tt-input').value

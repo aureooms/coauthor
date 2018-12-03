@@ -14,11 +14,12 @@ template(name="frontpage")
       .alert.alert-danger(role="alert") Please <B>sign in</B> (in the upper-right corner) to get started.
     else
       .alert.alert-warning(role="alert") Loading...
-  h3
-    span.badge= groupsMine.count
-    | Groups you're a member of
-  with groupsMine
-    +groupList
+  if currentUser
+    h3
+      span.badge= groupsMine.count
+      | Groups you're a member of
+    with groupsMine
+      +groupList
   if groupsPartial.count
     h3
       span.badge= groupsPartial.count
@@ -38,9 +39,10 @@ template(name="frontpage")
     with groupsOther
       +groupList
     .btn-group
-      button.btn.btn-info.groupNewButton New Group
-      button.btn.btn-warning.recomputeAuthorsButton Recompute Authors
-      button.btn.btn-warning.recomputeRootsButton Recompute Roots
+      button.btn.btn-info.groupNew New Group
+      button.btn.btn-warning.recomputeAuthors Recompute Authors
+      button.btn.btn-warning.recomputeEmoji Recompute Emoji
+      button.btn.btn-warning.recomputeRoots Recompute Roots
 
 template(name="groupList")
   .list-group

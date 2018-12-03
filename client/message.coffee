@@ -105,7 +105,7 @@ Template.registerHelper 'formatBody', ->
 Template.registerHelper 'formatFile', ->
   formatFile @
 
-Template.badMessage.helpers
+Template.messageBad.helpers
   message: -> Router.current().params.message
 
 orphans = (message) ->
@@ -156,6 +156,7 @@ Template.message.helpers
         username: true
         emails: true
         roles: true
+        rolesPartial: true
         'profile.notifications': true
     (for user in users when user.username not of subscribed
       unless user.emails?[0]?
@@ -193,7 +194,7 @@ Template.message.onRendered ->
     $('.affix').height $(window).height()
   $('nav.contents').on 'affixed-top.bs.affix', ->
     $('.affix-top').height $(window).height() - $('#top').outerHeight true
-  $('[data-toggle="tooltip"]').tooltip()
+  tooltipInit()
 
   ## Give focus to first Title input, if there is one.
   setTimeout ->
@@ -299,7 +300,7 @@ id2template = {}
 scrollToLater = null
 fileQuery = null
 
-updateFileQuery = ->
+updateFileQuery = _.debounce ->
   fileQuery.stop() if fileQuery?
   fileQuery = Messages.find
     _id: $in: _.keys images
@@ -311,10 +312,12 @@ updateFileQuery = ->
       initImageInternal images[id].file, id if images[id].file?
     changed: (id, fields) ->
       if fields.file? and images[id].file != fields.file
-        forceImgReload urlToFile id
+        if fileType(fields.file) in ['image', 'video']
+          forceImgReload urlToFile id
         imagesInternal[images[id].file].image = null if images[id].file?
         images[id].file = fields.file
         initImageInternal images[id].file, id if images[id].file?
+, 50
 
 initImage = (id) ->
   if id not of images
@@ -348,7 +351,7 @@ checkImageInternal = (id) ->
   image = imagesInternal[id].image
   checkImage image if image?
 
-messageDrag = (target, bodyToo = true) ->
+messageDrag = (target, bodyToo = true, old) ->
   return unless target
   onDragStart = (e) =>
     #url = "coauthor:#{@data._id}"
@@ -367,9 +370,12 @@ messageDrag = (target, bodyToo = true) ->
     #   "class='bad-file'" not in formatted
     #  url = formatted
     if bodyToo
-      $(@find '.message-file')?.find('img, video, a')?.each (i, elt) =>
+      $(@find '.message-file')?.find('img, video, a, canvas')?.each (i, elt) =>
+        elt.removeEventListener 'dragstart', old if old?
         elt.addEventListener 'dragstart', onDragStart
+  target.removeEventListener 'dragstart', old if old?
   target.addEventListener 'dragstart', onDragStart
+  onDragStart
 
 ## A message is "naturally" folded if it is flagged as minimized or deleted.
 ## It still will be default-folded if it's an image referenced in another
@@ -385,7 +391,8 @@ Template.submessage.onRendered ->
 
   ## Drag/drop support.
   focusButton = $(@find '.message-left-buttons').find('.focusButton')[0]
-  messageDrag.call @, focusButton
+  @autorun =>
+    listener = messageDrag.call @, focusButton, true, listener
 
   ## Fold naturally folded (minimized and deleted) messages
   ## by default on initial load.
@@ -423,9 +430,13 @@ Template.submessage.onRendered ->
       $($.parseHTML("<div>#{formatBody data.format, data.body}</div>"))
       .find """
         img[src^="#{fileUrlPrefix}"],
-        img[src^="#{Meteor.absoluteUrl fileUrlPrefix[1..]}"],
+        img[src^="#{fileAbsoluteUrlPrefix}"],
         img[src^="#{internalFileUrlPrefix}"],
-        img[src^="#{Meteor.absoluteUrl internalFileUrlPrefix[1..]}"]
+        img[src^="#{internalFileAbsoluteUrlPrefix}"],
+        video source[src^="#{fileUrlPrefix}"],
+        video source[src^="#{fileAbsoluteUrlPrefix}"],
+        video source[src^="#{internalFileUrlPrefix}"],
+        video source[src^="#{internalFileAbsoluteUrlPrefix}"]
       """
       .each ->
         src = @getAttribute('src')
@@ -455,6 +466,43 @@ Template.submessage.onRendered ->
           imagesInternal[id].count += 1
           checkImageInternal id
       @imagesInternal = newImagesInternal
+
+  ## Image rotation
+  @autorun =>
+    data = Template.currentData()
+    messageImageTransform.call @
+  window.addEventListener 'resize',
+    _.debounce (=> messageImageTransform.call @), 100
+
+## Cache EXIF orientations, as files should be static
+image2orientation = {}
+@messageRotate = (data) ->
+  if data.file not of image2orientation
+    file = findFile data.file
+    if file
+      image2orientation[data.file] = file.metadata?.exif?.Orientation
+  exifRotate = Orientation2rotate[image2orientation[data.file]]
+  (data.rotate ? 0) + (exifRotate ? 0)
+
+## Callable from `submessage` and `readMessage` templates
+@messageImageTransform = ->
+  return unless @data?
+
+  ## Transform any images embedded within message body
+  for img in @findAll """
+    .message-body img[src^="#{fileUrlPrefix}"],
+    .message-body img[src^="#{fileAbsoluteUrlPrefix}"]
+  """
+    message = findMessage url2file img.src
+    continue unless message
+    imageTransform img, messageRotate message
+
+  ## Transform image file, respecting history
+  data = messageHistory.get(@data._id) ? @data
+  if data.file and 'image' == fileType data.file
+    image = @find '.message-file img'
+    return unless image?
+    imageTransform image, messageRotate data
 
 scrollDelay = 750
 
@@ -509,6 +557,7 @@ here = (id) ->
   Router.current().params?.message == id
 
 Template.submessage.helpers
+  canReply: -> canPost @group, @_id
   tabindex: tabindex
   tabindex5: -> tabindex 5
   tabindex7: -> tabindex 7
@@ -583,7 +632,7 @@ Template.submessage.helpers
                   if username
                     return "@#{username}"
                   switch type
-                    when 'image'
+                    when 'image', 'video', 'pdf'
                       switch ti.data.format
                         when 'markdown'
                           "![](coauthor:#{id})"
@@ -591,8 +640,8 @@ Template.submessage.helpers
                           "\\includegraphics{coauthor:#{id}}"
                         when 'html'
                           """<img src="coauthor:#{id}">"""
-                    when 'video'
-                      """<video controls><source src="coauthor:#{id}"></video>"""
+                    #when 'video'
+                    #  """<video controls><source src="coauthor:#{id}"></video>"""
                     else
                       "coauthor:#{id}"
             cmDrop e
@@ -673,10 +722,6 @@ Template.submessage.helpers
       editorMode editor, ti.data.format
       editorKeyboard editor, messageKeyboard.get(ti.data._id) ? userKeyboard()
 
-  tags: historify 'tags', sortTags
-  deleted: historify 'deleted'
-  published: historify 'published'
-
   tex2jax: ->
     history = messageHistory.get(@_id) ? @
     if history.format in mathjaxFormats
@@ -691,8 +736,12 @@ Template.submessage.helpers
     else
       formatTitleOrFilename history, false  ## don't write (untitled)
   formatBody: ->
+    #console.log 'rendering', @_id
     history = messageHistory.get(@_id) ? @
     body = history.body
+    ## Apply image settings (e.g. rotation) on embedded images and image files
+    t = Template.instance()
+    Meteor.defer -> messageImageTransform.call t
     return body unless body
     ## Don't show raw view if editing (editor is a raw view)
     if messageRaw.get(@_id) and not Template.instance().editing?.get()
@@ -704,7 +753,10 @@ Template.submessage.helpers
     history = messageHistory.get(@_id) ? @
     ## Don't run PDF render if in raw mode
     return if messageRaw.get(@_id) or "pdf" != fileType history.file
-    url: urlToFile history
+    history.file
+  image: ->
+    history = messageHistory.get(@_id) ? @
+    'image' == fileType history.file
   formatFile: ->
     history = messageHistory.get(@_id) ? @
     format = formatFile history
@@ -734,8 +786,6 @@ Template.submessage.helpers
     history: messageHistory.get @_id
 
   raw: -> messageRaw.get @_id
-  prev: -> messageNeighbors(@)?.prev
-  next: -> messageNeighbors(@)?.next
 
   preview: ->
     messageHistory.get(@_id)? or
@@ -757,6 +807,23 @@ Template.submessage.helpers
   absentTags: absentTags
   absentTagsCount: ->
     absentTags().count()
+
+Template.messageTags.helpers
+  tags: historify 'tags', sortTags
+
+Template.messageLabels.helpers
+  deleted: historify 'deleted'
+  published: historify 'published'
+  minimized: historify 'minimized'
+  private: historify 'private'
+
+Template.messageNeighbors.helpers
+  prev: ->
+    tooltipUpdate()
+    messageNeighbors(@)?.prev
+  next: ->
+    tooltipUpdate()
+    messageNeighbors(@)?.next
 
 Template.belowEditor.helpers
   preview: -> messagePreviewGet()?.on
@@ -820,7 +887,7 @@ Template.submessage.events
     e.stopPropagation()
     message = t.data._id
     tags = t.data.tags
-    tag = e.target.getAttribute 'data-tag'
+    tag = e.currentTarget.getAttribute 'data-tag'
     if tag of tags
       delete tags[escapeTag tag]
       Meteor.call 'messageUpdate', message,
@@ -1035,23 +1102,25 @@ Template.messageHistory.onRendered ->
       ## Remove diff IDs
       delete diff._id
     @slider?.destroy()
-    @slider = new Slider @$('input')[0],
-      #min: 0                 ## min and max not needed when using ticks
-      #max: diffs.length-1
-      #value: diffs.length-1  ## doesn't update, unlike setValue method below
-      ticks: [0...diffs.length]
-      ticks_snap_bounds: 999999999
-      tooltip: 'always'
-      tooltip_position: 'bottom'
-      formatter: (i) ->
-        if i of diffs
-          formatDate(diffs[i].updated) + '\n' + diffs[i].updators.join ', '
-        else
-          i
-    @slider.setValue diffs.length-1
-    #@slider.off 'change'
-    @slider.on 'change', (e) =>
-      messageHistory.set @data._id, diffs[e.newValue]
+    `import('bootstrap-slider')`.then (Slider) =>
+      Slider = Slider.default
+      @slider = new Slider @$('input')[0],
+        #min: 0                 ## min and max not needed when using ticks
+        #max: diffs.length-1
+        #value: diffs.length-1  ## doesn't update, unlike setValue method below
+        ticks: [0...diffs.length]
+        ticks_snap_bounds: 999999999
+        tooltip: 'always'
+        tooltip_position: 'bottom'
+        formatter: (i) ->
+          if i of diffs
+            formatDate(diffs[i].updated) + '\n' + diffs[i].updators.join ', '
+          else
+            i
+      @slider.setValue diffs.length-1
+      #@slider.off 'change'
+      @slider.on 'change', (e) =>
+        messageHistory.set @data._id, diffs[e.newValue]
     messageHistory.set @data._id, diffs[diffs.length-1]
 
 uploader = (template, button, input, callback) ->
@@ -1078,10 +1147,22 @@ uploader = (template, button, input, callback) ->
 attachFiles = (files, e, t) ->
   message = t.data._id
   group = t.data.group
-  for file in files
-    file.callback = (file2) ->
-      Meteor.call 'messageNew', group, message, null,
-        file: file2.uniqueIdentifier
+  callbacks = {}
+  called = 0
+  ## Start all file uploads simultaneously.
+  for file, i in files
+    do (i) ->
+      file.callback = (file2, done) ->
+        ## Set up callback for when this file is completed.
+        callbacks[i] = ->
+          Meteor.call 'messageNew', group, message, null,
+            file: file2.uniqueIdentifier
+          , done
+        ## But call all the callbacks in order by file, so that replies
+        ## appear in the correct order.
+        while callbacks[called]?
+          callbacks[called]()
+          called += 1
     file.group = group
     Files.resumable.addFile file, e
 
@@ -1094,9 +1175,14 @@ replaceFiles = (files, e, t) ->
     console.error "Attempt to replace #{message} with #{files.length} files -- expected 1"
   else
     file = files[0]
-    file.callback = (file2) ->
-      Meteor.call 'messageUpdate', message,
+    file.callback = (file2, done) ->
+      diff =
         file: file2.uniqueIdentifier
+      ## Reset rotation angle on replace
+      data = findMessage message
+      if data.rotate
+        diff.rotate = 0
+      Meteor.call 'messageUpdate', message, diff, done
     file.group = group
     Files.resumable.addFile file, e
 
@@ -1145,14 +1231,48 @@ Template.threadPrivacy.events
       privacyOptionsByCode[e.target.getAttribute 'data-code'].list
     dropdownToggle e
 
+Template.emojiButtons.helpers
+  canReply: -> canPost @group, @_id
+  emoji: -> Emoji.find group: $in: [wildGroup, @group]
+  emojiMessages: ->
+    tooltipUpdate()
+    emojiReplies @
+  who: -> (displayUser user for user in @who).join ', '
+
+Template.emojiButtons.events
+  'click .emojiAdd': (e, t) ->
+    e.preventDefault()
+    e.stopPropagation()
+    message = t.data._id
+    symbol = e.currentTarget.getAttribute 'data-symbol'
+    #exists = EmojiMessages.findOne
+    #  message: message
+    #  creator: Meteor.user().username
+    #  symbol: symbol
+    #  deleted: false
+    exists = Meteor.user().username in (t.data.emoji?[symbol] ? [])
+    if exists
+      console.warn "Attempt to add duplicate emoji '#{symbol}' to message #{message}"
+    else
+      Meteor.call 'emojiToggle', message, symbol
+    dropdownToggle e
+
+  'click .emojiToggle:not(.disabled)': (e, t) ->
+    e.preventDefault()
+    e.stopPropagation()
+    tooltipHide t
+    message = t.data._id
+    symbol = e.currentTarget.getAttribute 'data-symbol'
+    Meteor.call 'emojiToggle', message, symbol
+
 Template.replyButtons.helpers
   canReply: -> canPost @group, @_id
-  canAttach: -> canPost @group, @_id
   canPublicReply: -> 'public' in (@threadPrivacy ? ['public'])
   canPrivateReply: -> 'private' in (@threadPrivacy ? ['public'])
 
 Template.tableOfContentsMessage.onRendered ->
-  messageDrag.call @, @find('a'), false
+  @autorun =>
+    listener = messageDrag.call @, @find('a'), false, listener
 
 addDragOver = (e) ->
   e.preventDefault()
@@ -1233,65 +1353,3 @@ Template.messageParentConfirm.events
     e.preventDefault()
     e.stopPropagation()
     Modal.hide()
-
-Template.messagePDF.onCreated ->
-  @page = new ReactiveVar 1
-  @pages = new ReactiveVar 1
-
-Template.messagePDF.onRendered ->
-  container = @find 'div.pdf'
-  window.addEventListener 'resize', => @resize?()
-  `import('pdfjs-dist')`.then (pdfjs) =>
-    pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js'  ## in /public
-    @autorun =>
-      pdfjs.getDocument(Template.currentData().url).then (pdf) =>
-        @pages.set pdf.numPages
-        @renderPage = =>
-          pdf.getPage(@page.get()).then (page) =>
-            viewport = page.getViewport 1
-            @resize = ->
-              ## Simulate width: 100%
-              width = container.parentElement.clientWidth
-              height = width * viewport.height / viewport.width
-              ## Simulate max-height: 100vh
-              if height > window.innerHeight
-                height = window.innerHeight
-                width = height * viewport.width / viewport.height
-              container.style.width = "#{width}px"
-              container.style.height = "#{height}px"
-            @resize()
-            page.getOperatorList().then (opList) ->
-              svgGfx = new pdfjs.SVGGraphics page.commonObjs, page.objs
-              svgGfx.getSVG opList, viewport
-              .then (svg) ->
-                #svg.preserveAspectRatio = true
-                container.innerHTML = ''
-                container.appendChild svg
-            #canvas = @find 'div.pdf'
-            #viewport = page.getViewport width / viewport.width
-            #page.render
-            #  canvasContext: canvas.getContext '2d'
-            #  viewport: viewport
-            #.then ->
-        @renderPage()
-
-Template.messagePDF.helpers
-  multiplePages: -> Template.instance().pages.get() > 1
-  page: -> Template.instance().page.get()
-  pages: -> Template.instance().pages.get()
-  disablePrev: ->
-    if Template.instance().page.get() <= 1
-      'disabled'
-  disableNext: ->
-    if Template.instance().page.get() >= Template.instance().pages.get()
-      'disabled'
-
-Template.messagePDF.events
-  'click .prevPage': (e, t) ->
-    if t.page.get() > 1
-      t.page.set t.page.get() - 1
-      t.renderPage?()
-  'click .nextPage': (e, t) ->
-    if t.page.get() < t.pages.get()
-      t.page.set t.page.get() + 1
-      t.renderPage?()

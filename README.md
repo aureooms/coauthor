@@ -11,9 +11,10 @@ in other fields too.
 ## Features So Far ##
 
 * **Live updates**/redraw of everything, thanks to
-  [Meteor](https://www.meteor.com/).  No more hitting "reload".
+  [Meteor](https://www.meteor.com/).
   If you're looking at a problem and someone posts/edits something,
   you see it as quickly as they see their preview (roughly 1-second delay).
+  You should never have to hit "reload" (except in case of a bug).
 
 * **Real-time editing** of messages in the style of Google Docs/EtherPad
   (Operational Transforms), if people feel like editing together
@@ -29,7 +30,8 @@ in other fields too.
   All formats support LaTeX math (via `$...$`, `$$...$$`, `\(...\)`, `\[...\]`,
   or `\begin{align/equation/eqnarray}...\end{align/equation/eqnarray}`)
   via [KaTeX](https://khan.github.io/KaTeX/), so math mode supports
-  [this list of supported functions](https://github.com/Khan/KaTeX/wiki/Function-Support-in-KaTeX).
+  [this list of supported functions](https://khan.github.io/KaTeX/function-support.html).
+  Macros defined with `\gdef` can be used throughout one message.
 
   * [Github-style Markdown](https://guides.github.com/features/mastering-markdown/)
     (default), e.g., `*italic*`, `**bold**`, `~~strikethrough~~`,
@@ -56,6 +58,7 @@ in other fields too.
     `\BY{...}`, `\YEAR{...}`,
     `\chapter`, `\section`, `\subsection`, `\subsubsection`, `\footnote`,
     `\includegraphics[width/height/scale]{url}`,
+    `\smallskip`, `\medskip`, `\bigskip`, `\noindent`,
     `\"`, `\'`, ```\` ```, `\^`, `\~`, `\=`, `\c`, `\v`, `\u`, `\H`,
     `\textasciitilde`, `\textasciicircum`, `\textbackslash`,
     `\textellipsis`, `\dots`, `\ldots`,
@@ -64,8 +67,8 @@ in other fields too.
     `\begin/\end` for environments `verbatim`, `enumerate`, `itemize`,
     `quote`, `tabular` (basic),
     `equation`, `eqnarray`, `align`,
-    `problem`, `theorem`, `conjecture`, `lemma`, `corollary`, `fact`,
-    `observation`, `proposition`, `claim`, `proof`.
+    `problem`, `question`, `idea`, `theorem`, `conjecture`, `lemma`,
+    `corollary`, `fact`, `observation`, `proposition`, `claim`, `proof`.
   * HTML, sanitized.  The following tags are allowed; feel free to ask for
     more.  `<h1>`, `<h2>`, `<h3>`, `<h4>`, `<h5>`, `<h6>`,
     `<blockquote>`, `<p>`, `<div>`, `<span>`,
@@ -89,12 +92,12 @@ in other fields too.
   with specific users, for visitors or paper merges etc.
 
 * **Sorting** of threads within a group by title, creator, creation date,
-  last update, number of posts, or whether subscribed (by clicking on the
-  corresponding column, once for default sort order and again for
-  opposite sort order).  Intelligent handling of numbers while sorting,
-  e.g. "9." comes before "10.".  Deleted messages always sort to the very
-  bottom; minimized messages always sort near the bottom; and unpublished
-  messages always sort near the top.
+  last update, number of posts, number of positive emoji responses, or whether
+  subscribed (by clicking on the corresponding column, once for default sort
+  order and again for opposite sort order).  Intelligent handling of numbers
+  while sorting, e.g. "9." comes before "10.".  Deleted messages always sort
+  to the very bottom; minimized messages always sort near the bottom; and
+  unpublished messages always sort near the top.
 
 * "**Live Feed**" to watch messages as they get changed/posted.  Useful for
   projecting the latest activity onto a big screen while a group is gathered
@@ -124,8 +127,16 @@ in other fields too.
 * **Tags**: attach an arbitrary set of strings to a message.  Find other
   messages with the same tag by clicking on a tag.
 
-* **Search** across an entire group for posts by keywords using the search bar
-  at the top.  Search for a word as a (whole) `word`, `prefix*`, `*suffix`,
+* **Emoji** for super-short responses that show appreciation but don't cause
+  email notifications or take up much space.  (Like Github and Slack.)
+  Hover over an emoji to see a list of people who added the emoji; click to
+  toggle your own status.  Emoji are positive (purple) or negative (red).
+  Positive emoji on root messages are counted on the group page, enabling
+  a simple voting system for e.g. which problems to work on. 
+
+* **Search** across an entire group, or across all groups,
+  for posts by keywords using the search bar at the top.
+  Search for a word as a (whole) `word`, `prefix*`, `*suffix`,
   `*substring*`, or `prefix*suffix`.
   Lower-case letters are case insensitive,
   while upper-case letters are case sensitive.
@@ -137,7 +148,12 @@ in other fields too.
   Use quotes (`'...'` or `"..."`) to search for phrases or `regex:"..."`
   to search for regular expressions with spaces in them; normally,
   spaces act as an AND query.
+  Connect words/phrases with `|` to get an OR query instead.
   `tag:...` does an exact match for a specified tag; it can be negated.
+  `is:root` matches root messages (tops of threads).
+  `is:file` matches file messages (made via Attach).
+  `is:deleted`, `is:published`, `is:private`, `is:minimized` match various
+  states of messages.
 
 * **User search**:
   find posts by a particular user by clicking on their username.
@@ -145,10 +161,12 @@ in other fields too.
 
 * **Statistics** about user's and all posts within a group, by day, week
   (with configurable week start), month, year, or hour within a day.
+  Your own statistics are available via the Statistics button on the group
+  page, while other users' stats are available from their user page.
 
 * **Permanent URLs** for all messages, groups, etc., for easy emailing etc.
   (but other than group name, not revealing, so only those with permission
-  can open).  Links to other messages via specical coauthor:xxx syntax.
+  can open).  Links to other messages via specical `coauthor:xxx` syntax.
   Drag messages (via their arrow icon) into other messages to make such links.
 
 * **Files** (another type of message) can be attached to other messages, as
@@ -158,9 +176,10 @@ in other fields too.
   button or dragging a file onto that button.
   File messages can have title and body too; title defaults to the filename.
   Image/video files (including PNG, JPEG, SVG, MP4) are displayed inline.
-  PDF files are converted to SVG using
-  [pdf.js](https://mozilla.github.io/pdf.js/)
-  and displayed inline, with page-turning buttons.
+  Images automatically detect EXIF orientation, and can be further rotated by
+  multiples of 90 degrees in edit mode.
+  PDF files are rendered using [pdf.js](https://mozilla.github.io/pdf.js/),
+  only when visible on screen, and displayed inline with page-turning buttons.
 
 * Messages can start/be marked **Unpublished** (not yet finished) or
   **Deleted** (mistake / no longer useful).
@@ -216,6 +235,11 @@ in other fields too.
 
 ## User Tips ##
 
+* On Android, the
+  [Chrome browser](https://play.google.com/store/apps/details?id=com.android.chrome&hl=en)
+  with [SwiftKey keyboard](https://play.google.com/store/apps/details?id=com.touchtype.swiftkey)
+  seems to work best for editing messages in Coauthor.
+  (Firefox and Gboard have cursor positioning issues.)
 * LaTeX mode supports LaTeX accents (like `\'e`), but other modes do not.  To
   easily type accented characters (e.g., on Windows where this is not easy), try
   [this Chrome extension](https://chrome.google.com/webstore/detail/fastaccent/gkadokkbkifbfpiljldcnnpkebpannhb/related?hl=en-GB)

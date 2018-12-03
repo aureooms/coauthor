@@ -31,16 +31,38 @@ Router.route '/:group/m/:message',
   #,
   name: 'message'
   template: 'messageMaybe'
-  subscriptions: -> [
-    Subscribe.subscribe 'messages.submessages', @params.message
-    Subscribe.subscribe 'messages.root', @params.group
-    Subscribe.subscribe 'groups.members', @params.group
-    Subscribe.subscribe 'tags', @params.group
-    Subscribe.subscribe 'files', @params.group
-  ]
+  subscriptions: ->
+    subs = [
+      Subscribe.subscribe 'messages.submessages', @params.message
+      #Subscribe.subscribe 'emoji.submessages', @params.message
+    ]
+    ## Wild message links will get redirected to the proper group; wait on that
+    unless @params.group == wildGroup
+      subs.push [
+        Subscribe.subscribe 'messages.root', @params.group
+        Subscribe.subscribe 'groups.members', @params.group
+        Subscribe.subscribe 'tags', @params.group
+        Subscribe.subscribe 'files', @params.group
+      ]...
+    subs
   data: ->
     Messages.findOne @params.message
   #dataNotFoundTemplate: 'NotFound'
+  action: ->
+    if @params.group == wildGroup
+      if @ready()
+        msg = findMessage @params.message
+        if msg?.group
+          return @redirect 'message',
+            group: msg.group
+            message: @params.message
+          ,
+            replaceState: true
+            hash: @params.hash
+            query: @params.query
+      @render 'messageBad'
+    else
+      @render()
   fastRender: true
 
 Router.route '/:group',
@@ -53,6 +75,7 @@ Router.route '/:group',
   name: 'group'
   subscriptions: -> [
     Subscribe.subscribe 'messages.root', @params.group
+    #Subscribe.subscribe 'emoji.root', @params.group
     Subscribe.subscribe 'groups.members', @params.group
     Subscribe.subscribe 'tags', @params.group
   ]
@@ -65,6 +88,7 @@ Router.route '/:group/+:sortBy?',
   template: 'group'
   subscriptions: -> [
     Subscribe.subscribe 'messages.root', @params.group
+    #Subscribe.subscribe 'emoji.root', @params.group
     Subscribe.subscribe 'groups.members', @params.group
     Subscribe.subscribe 'tags', @params.group
   ]
@@ -77,6 +101,7 @@ Router.route '/:group/-:sortBy?',
   template: 'group'
   subscriptions: -> [
     Subscribe.subscribe 'messages.root', @params.group
+    #Subscribe.subscribe 'emoji.root', @params.group
     Subscribe.subscribe 'groups.members', @params.group
     Subscribe.subscribe 'tags', @params.group
   ]

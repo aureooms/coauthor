@@ -44,6 +44,12 @@ if Meteor.isServer
   ]
 
 @fileUrlPrefix = "/file/"
+@fileAbsoluteUrlPrefix = Meteor.absoluteUrl fileUrlPrefix[1..]
+@internalFileUrlPrefix = "#{Files.baseURL}/id/"
+@internalFileAbsoluteUrlPrefix = Meteor.absoluteUrl internalFileUrlPrefix[1..]
+@fileUrlPattern =
+  "(?:(#{fileUrlPrefix}|#{fileAbsoluteUrlPrefix})|" +
+   "(#{internalFileUrlPrefix}|#{internalFileAbsoluteUrlPrefix}))"
 
 ## If given object has a `file` but no `_id` field, then we make a link
 ## to the internal file object instead of the file associated with a message.
@@ -53,35 +59,23 @@ if Meteor.isServer
   if id.file?
     urlToInternalFile id
   else
-    Meteor.absoluteUrl "#{fileUrlPrefix[1..]}#{id}"
+    "#{fileAbsoluteUrlPrefix}#{id}"
 
 @url2file = (url) ->
-  if url[...fileUrlPrefix.length] == fileUrlPrefix
-    url[fileUrlPrefix.length..]
-  else
-    absolutePrefix = Meteor.absoluteUrl fileUrlPrefix[1..]
-    if url[...absolutePrefix.length] == absolutePrefix
-      url[absolutePrefix.length..]
-    else
-      throw new Meteor.Error 'url2file.invalid',
-        "Bad file URL #{url}"
-
-@internalFileUrlPrefix = "#{Files.baseURL}/id/"
+  for prefix in [fileUrlPrefix, fileAbsoluteUrlPrefix]
+    if url[...prefix.length] == prefix
+      return url[prefix.length..]
+  throw new Meteor.Error 'url2file.invalid', "Bad file URL #{url}"
 
 @urlToInternalFile = (id) ->
   id = id.file if id.file?
-  Meteor.absoluteUrl "#{internalFileUrlPrefix[1..]}#{id}"
+  "#{internalFileAbsoluteUrlPrefix}#{id}"
 
 @url2internalFile = (url) ->
-  if url[...internalFileUrlPrefix.length] == internalFileUrlPrefix
-    url[internalFileUrlPrefix.length..]
-  else
-    absolutePrefix = Meteor.absoluteUrl internalFileUrlPrefix[1..]
-    if url[...absolutePrefix.length] == absolutePrefix
-      url[absolutePrefix.length..]
-    else
-      throw new Meteor.Error 'url2internalFile.invalid',
-        "Bad file URL #{url}"
+  for prefix in [internalFileUrlPrefix, internalFileAbsoluteUrlPrefix]
+    if url[...prefix.length] == prefix
+      return url[prefix.length..]
+  throw new Meteor.Error 'url2internalFile.invalid', "Bad file URL #{url}"
 
 @findFile = (id) ->
   Files.findOne new Meteor.Collection.ObjectID id
@@ -126,12 +120,12 @@ if Meteor.isServer
       file.metadata.uploader = userId
       memberOfGroup file.metadata.group ? wildGroup, findUser userId
     remove: (userId, file) ->
-      file.metadata?.uploader in [userId, null]
+      file.metadata?.uploader == userId
     read: (userId, file) ->
-      file.metadata?.uploader in [userId, null] or
+      file.metadata?.uploader == userId or
       memberOfGroup file.metadata?.group, findUser userId
     write: (userId, file, fields) ->
-      file.metadata?.uploader in [userId, null]
+      file.metadata?.uploader == userId
 else
   Tracker.autorun ->
     Meteor.userId()  ## rerun when userId changes
@@ -168,10 +162,18 @@ else
   Files.resumable.on 'fileProgress', (file) =>
     updateUploading -> @[file.uniqueIdentifier].progress = Math.floor 100*file.progress()
   Files.resumable.on 'fileSuccess', (file) ->
-    updateUploading -> delete @[file.uniqueIdentifier]
-    if _.keys(Session.get 'uploading').length == 0
-      window.dispatchEvent new Event 'filesDone'
-    file.file.callback?(file)
+    ## Mark file as completed *after* callback succeeds, if it's provided.
+    updateUploading -> @[file.uniqueIdentifier].progress = 100
+    completed = (error, result) =>
+      updateUploading -> delete @[file.uniqueIdentifier]
+      if _.keys(Session.get 'uploading').length == 0
+        window.dispatchEvent new Event 'filesDone'
+      if error
+        console.error "Error in upload callback: #{error}"
+    if file.file.callback?
+      file.file.callback file, completed
+    else
+      completed()
   Files.resumable.on 'fileError', (file) ->
     console.error "Error uploading", file.uniqueIdentifier
     updateUploading -> delete @[file.uniqueIdentifier]

@@ -102,6 +102,7 @@ if Meteor.isServer
   group = findGroup msg.group
   if options.fields?
     options.fields.roles = true
+    options.fields.rolesPartial = true
     options.fields['profile.notifications'] = true
   users = Meteor.users.find
     username: $in: groupMembers group
@@ -484,7 +485,7 @@ if Meteor.isServer
             delete changed.title
             delete changed.format
             ## Don't notify about empty body on new file message
-            delete changed.body if msg.file
+            delete changed.body if msg.file and not msg.body
           authors = _.sortBy notification.authors, userSortKey
           authorsText = (displayUser author for author in authors).join ', '
           authorsHTML = (linkToAuthor msg.group, author for author in authors).join ', '
@@ -564,6 +565,13 @@ if Meteor.isServer
                      "File upload: &ldquo;#{file.filename}&rdquo; (#{file.length} bytes)"
             else
               bullet "File upload: #{msg.file}?"
+          if changed.rotate
+            delta = angle180 (msg.rotate ? 0) - (old.rotate ? 0)
+            if delta != 0
+              if delta != (msg.rotate ? 0)
+                bullet "Rotated #{delta}° (now #{msg.rotate ? 0}°)"
+              else
+                bullet "Rotated #{delta}°"
           if textBullets.length > 0
             text += textBullets.join ''
           if htmlBullets.length > 0

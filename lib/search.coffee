@@ -16,18 +16,21 @@ SEARCH LANGUAGE:
   Case sensitive.
 * Prefix any of the above with a minus (`-`) to negate the match.
 * Connecting queries via spaces does an implicit AND (like Google)
+* Connecting queries via `|` does an OR (like Google)
 * Use quotes ('...' or "...") to prevent this behavior.  For example,
   search for "this phrase" or title:"this phrase" or regex:"this regex"
   or title:regex:"this regex" or -title:"this phrase".
 * tag:... does an exact match for a specified tag.  It can be negated with -,
   but does not behave specially with regex: or *s.
+* is:root matches root messages (tops of threads)
+* is:file matches file messages (resulting from Attach button)
+* is:deleted, is:published, is:private, is:minimized
+  match those statuses of messages
 ###
 
-escapeRegExp = (regex) ->
+@escapeRegExp = (regex) ->
   ## https://stackoverflow.com/questions/3446170/escape-string-for-use-in-javascript-regex
-  #s.replace /[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, "\\$&"
-  ## Intentionally omitting * which we're defining in parseSearch
-  regex.replace /[\-\[\]\/\{\}\(\)\+\?\.\\\^\$\|]/g, "\\$&"
+  regex.replace /[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, "\\$&"
 
 caseInsensitiveRegExp = (regex) ->
   regex.replace /[a-z]/g, (char) -> "[#{char}#{char.toUpperCase()}]"
@@ -53,12 +56,18 @@ unescapeRegExp = (regex) ->
 @parseSearch = (search) ->
   ## Quoted strings turn off separation by spaces.
   ## Last quoted strings doesn't have to be terminated.
-  tokenRe = /(\s+)|((?:"[^"]*"|'[^']*'|[^'"\s])+)('[^']*$|"[^"]*$)?|'([^']*)$|"([^"]*)$/g
+  tokenRe = /(\s+)|((?:"[^"]*"|'[^']*'|[^'"\s|])+)('[^']*$|"[^"]*$)?|'([^']*)$|"([^"]*)$|([|])/g
   wants = []
+  options = [wants]
   while (token = tokenRe.exec search)?
     continue if token[1]  ## ignore whitespace tokens
+
+    if token[6]  ## | = OR
+      options.push wants = []
+      continue
+
     ## Check for negation and/or leading commands followed by colon
-    colon = /^-?(?:(?:regex|title|body|tag):)*/.exec token[0]
+    colon = /^-?(?:(?:regex|title|body|tag|is):)*/.exec token[0]
     colon = colon[0]
     ## Remove quotes (which are just used for avoiding space parsing).
     if token[4]
@@ -79,7 +88,7 @@ unescapeRegExp = (regex) ->
     if 0 <= colon.indexOf 'regex:'
       regex = token
       colon = colon.replace /regex:/g, ''
-    else
+    else if 0 > colon.indexOf 'is:'
       starStart = token[0] == '*'
       if starStart
         token = token.substring 1
@@ -91,7 +100,7 @@ unescapeRegExp = (regex) ->
       regex = escapeRegExp token
       ## Outside regex mode, lower-case letters are case-insensitive
       regex = caseInsensitiveRegExp regex
-      regex = regex.replace /\*/g, '\\S*'
+      regex = regex.replace /\\\*/g, '\\S*'  ## * was already escaped
       if not starStart and regex.match /^[\[\w]/  ## a or [aA]
         regex = "\\b#{regex}"
       if not starEnd and regex.match /[\w\]]$/  ## a or [aA]
@@ -125,17 +134,53 @@ unescapeRegExp = (regex) ->
           wants.push body: regex
       when 'tag:'
         wants.push "tags.#{escapeTag token}": $exists: not negate
-  if wants.length == 1
-    wants[0]
-  else
-    $and: wants
+      when 'is:'
+        switch token
+          when 'root'
+            if negate
+              wants.push root: $ne: null
+            else
+              wants.push root: null
+          when 'file'
+            if negate
+              wants.push file: null
+            else
+              wants.push file: $ne: null
+          when 'published'
+            if negate
+              wants.push published: false
+            else
+              wants.push published: $ne: false
+          when 'deleted', 'minimized', 'private'
+            if negate
+              wants.push "#{token}": $ne: true
+            else
+              wants.push "#{token}": true
+          else
+            console.warn "Unknown 'is:' specification '#{token}'"
+  options =
+    for wants in options
+      switch wants.length
+        when 0
+          continue
+        when 1
+          wants[0]
+        else
+          $and: wants
+  switch options.length
+    when 0
+      null  ## special signal for nothing / bad search
+    when 1
+      options[0]
+    else
+      $or: options
 
 @formatSearch = (search) ->
   query = parseSearch search
   if query?
     formatted = formatParsedSearch query
   else
-    "invalid query &ldquo;#{search}&rdquo;"
+    "invalid query '#{search}'"
 
 formatParsedSearch = (query) ->
   keys = _.keys query
@@ -172,6 +217,11 @@ formatParsedSearch = (query) ->
        _.isEqual query.$or[0].title, query.$or[1].body
       parts[0].replace /in title$/, 'in title or body'
     else
+      if parts.length > 1
+        parts =
+          for part in parts
+            part = "(#{part})" if 0 <= part.indexOf ' AND '
+            part
       parts.join ' OR '
   else if _.isEqual keys, ['$not']
     "#{formatParsedSearch query.$not} not"
@@ -189,6 +239,52 @@ formatParsedSearch = (query) ->
         "not tagged '#{unescapeTag key[5..]}'"
     else
       "tag #{key[5..]}: #{JSON.stringify value}"
+  else if _.isEqual keys, ['root']
+    root = query.root
+    prefix = ''
+    if _.isObject(root) and _.isEqual _.keys(root), ['$ne']
+      root = root.$ne
+      prefix = 'not '
+    prefix +
+    if root == null
+      "root message"
+    else
+      "descendant of message #{root}"
+  else if _.isEqual keys, ['file']
+    if _.isEqual query.file, null
+      'not a file'
+    else if _.isEqual query.file, {$ne: null}
+      'a file'
+    else
+      "associated with file '#{query.file}'"
+  else if _.isEqual keys, ['published']
+    if _.isEqual query.published, false
+      'unpublished'
+    else if _.isEqual query.published, {$ne: false}
+      'published'
+    else
+      "published: #{query.published}"
+  else if _.isEqual keys, ['deleted']
+    if _.isEqual query.deleted, true
+      'deleted'
+    else if _.isEqual query.deleted, {$ne: true}
+      'not deleted'
+    else
+      "deleted: #{query.deleted}"
+  else if _.isEqual keys, ['minimized']
+    if _.isEqual query.minimized, true
+      'minimized'
+    else if _.isEqual query.minimized, {$ne: true}
+      'not minimized'
+    else
+      "minimized: #{query.minimized}"
+  else if _.isEqual keys, ['private']
+    if _.isEqual query.private, true
+      'private'
+    else if _.isEqual query.private, {$ne: true}
+      'not private'
+    else
+      "private: #{query.private}"
   else if _.isRegExp query
     simplify = unbreakRegExp uncaseInsensitiveRegExp query.source
     if realRegExp simplify
@@ -223,9 +319,10 @@ if Meteor.isServer
   Meteor.publish 'messages.search', (group, search) ->
     check group, String
     check search, String
+    parsed = parseSearch search
     @autorun ->
       query = accessibleMessagesQuery group, findUser @userId
-      return @ready() unless query?
+      return @ready() unless query? and parsed?
       query = $and: [
         query
         parseSearch search

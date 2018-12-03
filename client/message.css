@@ -1,6 +1,7 @@
 .space { padding-left: 0.5em; }
+.absolute { position: absolute; }
 
-.glyphicon-paperclip { vertical-align: middle; }
+.fa-paperclip { vertical-align: middle; }
 .title { font-weight: bold; vertical-align: middle; }
 input.title { width: 100%; }
 .author { font-style: italic; }
@@ -15,13 +16,27 @@ input.title { width: 100%; }
 .message > .panel-heading { padding: 5px 5px 5px 10px; }
 .root > .panel-heading { padding: 5px 5px 5px 10px; border-bottom: 0px; }
 .messageTitle { display: inline-block; padding: 5px 5px 5px 0px; }
+.panel-secondbody > .messageTitle { display: inline; color: gray; }
+.panel-secondbody > .messageTitle > .panel-title { font-weight: normal; font-size: small; }
+.linkToTop { margin-top: -4px; }
 .messageTags > a:first-child, .messageLabels > span:first-child { margin-left: 0.5em; }
 input.title ~ .message-right-buttons { margin: 0px; }
-.message-reply-buttons { margin-right: 1em; margin-bottom: 15px; }
+.message-reply-buttons { margin: 8px 0px 10px 0px; }
 .fileDescription { padding: 0.5ex 0.5em; border-bottom: 1px solid #337ab7;
   display: flex; flex-direction: row;
   justify-content: space-between; align-items: center; }
 .fileDescriptionText { flex-grow: 1; }
+
+/* Emoji */
+.emoji-plus { font-size: 0.7em; margin-top: -2px; vertical-align: middle; }
+.emoji-face { margin-top: -2px; vertical-align: middle; }
+.positive { color: #8465b3; }
+.negative { color: #d9534f; }
+.emojiMenu { padding: 5px; /* normally 5px 0 */
+             width: max-content; min-width: auto; max-width: 300px; }
+.emojiMenu > li { display: inline-block; }
+.emojiMenu > li > a { display: inline-block; font-size: large;
+  padding: 8px 8px; /* normally 3px 20px */ }
 
 .previewButtons { padding: 0px 15px; }
 .sideBySide { width: 50%; margin: 0px; display: inline-block; }
@@ -52,11 +67,13 @@ input.title ~ .message-right-buttons { margin: 0px; }
 img, video { max-width: 100%; max-height: 100vh; }
 .pdfBox { width: 100%; }
 .pdf > svg { width: 100%; height: auto; }
+.pdf > canvas { position: absolute; }
 
-.historySlider { margin-left: 5em; margin-right: 5em; }
+.historySlider { margin-left: 25px; margin-right: 25px; margin-top: 5px; }
+  /* 15px to match panel + 10px for tick radius */
 .slider.slider-horizontal { width: 100%; }
 
-.panel-secondbody { margin-top: -5px; padding-top: 0px; padding-bottom: 15px; }
+.panel-secondbody { margin-top: -10px; padding-top: 0px; padding-bottom: 10px; }
 
 .save-alert { padding: 6px 15px; margin-left: 1px; margin-bottom: 0px; }
 
@@ -72,8 +89,14 @@ nav.contents { overflow-y: scroll; padding-bottom: 5px; }
 .contents li > a.minimized { color: #449d44; font-size: small; padding: 3px 10px; }
 .affix { top: 0px; }
 
-code.raw { white-space: pre-wrap; color: #333; }  /* match <pre> */
-pre { white-space: pre-wrap; }
+code.raw, pre { white-space: pre-wrap; }
+/* match <pre>, overriding Bootstrap code defaults */
+code { color: #333; background-color: #f5f5f5; font-size: 100%; }
+s .katex .base, del .katex .base { position: relative; } /* already in KaTeX */
+s .katex .base:after, del .katex .base:after { content: "";
+  position: absolute; left: 0; width: 100%; top: 50%; display: block;
+  height: 1.3px; background: #c7254e; }
+s, del { text-decoration-color: #c7254e; }
 
 .root { margin-bottom: 0px; } /* glom onto message below */
 
@@ -93,8 +116,8 @@ pre { white-space: pre-wrap; }
 .parentArrow2 { margin-top: 12px; border-top: red dotted 2px; height: 14px; width: 15%; }
 .parentArrow3 { margin-top: 12px; border-top: solid 2px; border-left: solid 2px; height: 14px; width: 15%; }
 .parentArrow4 { border-right: solid 2px; border-bottom: solid 2px; height: 14px; width: 15%; }
-.parentArrow .glyphicon { margin-top: 4px; }
-.parentArrow .glyphicon-remove { color: red; }
+.parentArrow .fas { margin-top: 5px; }
+.parentArrow .fa-times { color: red; }
 
 @media print {
   a[href].btn:after { content: ""; } /* override Bootstrap default */

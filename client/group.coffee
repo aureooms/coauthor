@@ -26,6 +26,9 @@ Template.registerHelper 'wildGroup', ->
 
 Template.registerHelper 'groupData', groupData
 
+Template.registerHelper 'groupDataOrWild', ->
+  routeGroup() == wildGroup or groupData()
+
 @sortBy = ->
   if Router.current().params.sortBy in sortKeys
     key: Router.current().params.sortBy
@@ -63,6 +66,8 @@ Template.group.helpers
     pluralize(groupSortedBy(@group, null).count(), 'message thread')
   groupTags: ->
     groupTags @group
+  membersCount: ->
+    groupMembers(@group).length
   members: ->
     members =
       for member in sortedGroupMembers @group
@@ -128,7 +133,7 @@ Template.groupButtons.helpers
       'You need to be logged in to post a message.'
 
 Template.groupButtons.onRendered ->
-  $('[data-toggle="tooltip"]').tooltip()
+  tooltipInit()
 
 Template.groupButtons.events
   'click .sortSetDefault': (e) ->
@@ -223,7 +228,7 @@ Template.superdeleteImport.events
 
 Template.messageList.onRendered ->
   mathjax()
-  $('[data-toggle="tooltip"]').tooltip()
+  tooltipInit()
 
 Template.messageList.helpers
   linkToSort: (key) ->
@@ -234,14 +239,21 @@ Template.messageList.helpers
     else
       linkToSort
         key: key
-        reverse: key in ['published', 'updated', 'posts', 'subscribe']  ## default reverse
+        ## Default reverse setting when switching sort keys:
+        reverse: key in ['published', 'updated', 'posts', 'emoji', 'subscribe']
   sortingBy: (key) ->
     sortBy().key == key
   sortingGlyph: ->
-    if sortBy().reverse
-      'glyphicon-sort-by-alphabet-alt'
+    sort = sortBy()
+    if sort.key in ['title', 'creator']
+      type = 'alpha'
     else
-      'glyphicon-sort-by-alphabet'
+      type = 'numeric'
+    if sort.reverse
+      order = 'up'
+    else
+      order = 'down'
+    "fa-sort-#{type}-#{order}"
   topMessages: ->
     groupSortedBy @group, sortBy()
 
@@ -262,6 +274,22 @@ Template.messageShort.helpers
     formatDate @submessageLastUpdate
   subscribed: ->
     subscribedToMessage @
+  emojiPositive: ->
+    emojiReplies @, class: 'positive'
+  #emojiNegative: ->
+  #  emojiReplies @, class: 'negative'
+  emojiCount: ->
+    sum = 0
+    for emoji in @
+      sum += emoji.who.length
+    sum
+  emojiWho: ->
+    tooltipUpdate()
+    text = []
+    for emoji in @
+      for user in emoji.who
+        text.push """<span class="fas fa-#{emoji.symbol}"></span> #{displayUser user}"""
+    text.join ', '
 
 Template.messageShort.events
   'click button.subscribe': (e, t) ->

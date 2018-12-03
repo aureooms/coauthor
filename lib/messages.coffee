@@ -14,6 +14,13 @@ import { ShareJS } from 'meteor/edemaine:sharejs'
   else
     msg.title
 
+@angle180 = (a) ->
+  while a > 180
+    a -= 360
+  while a <= -180
+    a += 360
+  a
+
 @Messages = new Mongo.Collection 'messages'
 @MessagesDiff = new Mongo.Collection 'messages.diff'
 @MessagesParent = new Mongo.Collection 'messages.parents'
@@ -80,7 +87,39 @@ naturallyVisibleQuery =
       ]
     else
       naturallyVisibleQuery
-  if canSuper group, client, user #groupRoleCheck group, 'super', user
+  ## Wild group case effectively unions over all groups
+  ## (duplicating logic below when it helps make shorter queries).
+  if group == wildGroup
+    if canSuper group, client, user #groupRoleCheck group, 'super', user
+      ## Global superuser can read all messages (when in superuser mode)
+      {}
+    else
+      groups = memberOfGroups user
+      fullGroups = []
+      partialGroups = []
+      for group in groups
+        if groupRoleCheck group, 'read', user
+          fullGroups.push group
+        else
+          partialGroups.push group
+      ## Groups with full membership can be combined into one query.
+      fullQuery = canSeeQuery()
+      fullQuery.group = $in: fullGroups
+      if partialGroups.length > 0
+        ## Groups with partial membership need their queries OR'd together.
+        partialQuery = $or:
+          for group in partialGroups
+            accessibleMessagesQuery group, user, client
+        if fullGroups.length > 0 and partialGroups.length > 0
+          $or: [
+            fullQuery
+            partialQuery
+          ]
+        else
+          partialQuery
+      else
+        fullQuery  ## also works when fullGroups.length == 0
+  else if canSuper group, client, user #groupRoleCheck group, 'super', user
     ## Super-user can see all messages, even unpublished/deleted messages.
     group: group
   else if groupRoleCheck group, 'read', user
@@ -103,7 +142,9 @@ naturallyVisibleQuery =
 
 @messageReaders = (msg, options = {}) ->
   group = findGroup message2group msg
-  options.fields.roles = true if options.fields?
+  if options.fields?
+    options.fields.roles = true
+    options.fields.rolesPartial = true
   users = Meteor.users.find
     username: $in: groupMembers group
   .fetch()
@@ -143,7 +184,7 @@ if Meteor.isServer
   Meteor.publish 'messages.submessages', (msgId) ->
     check msgId, String
     @autorun ->
-      message = Messages.findOne msgId
+      message = findMessage msgId
       return @ready() unless message?.group?
       query = accessibleMessagesQuery message.group, findUser @userId
       return @ready() unless query?
@@ -284,9 +325,11 @@ if Meteor.isServer
 
 @parseSince = (since) ->
   try
-    match = /^\s*[+-]?\s*(\d+)\s*(\w+)\s*$/.exec since
+    match = /^\s*[+-]?\s*([\d.]+)\s*(\w+)\s*$/.exec since
     if match?
-      moment().subtract(match[1], match[2]).toDate()
+      amount = parseFloat match[1]
+      return null if isNaN amount
+      moment().subtract(amount, match[2]).toDate()
     else
       match = /^\s*(\d+)\s*:\s*(\d+)\s*$/.exec since
       if match?
@@ -580,6 +623,7 @@ export messageContentFields = [
   'deleted'
   'private'
   'minimized'
+  'rotate'
 ]
 
 export messageExtraFields = [
@@ -628,6 +672,8 @@ _messageUpdate = (id, message, authors = null, old = null) ->
     deleted: Match.Optional Boolean
     private: Match.Optional Boolean
     minimized: Match.Optional Boolean
+    rotate: Match.Optional Match.Where (r) ->
+      typeof r == "number" and -180 < r <= 180
 
   ## Don't update if there aren't any actual differences.
   difference = false
@@ -741,6 +787,12 @@ _messageParent = (child, parent, position = null, oldParent = true, importing = 
   if root != cmsg.root
     Messages.update child,
       $set: root: root
+    EmojiMessages.update
+      message: child
+    ,
+      $set: root: root
+    ,
+      multi: true
     if cmsg.root?
       ## If we move a nonroot message to have new root, update descendants.
       descendants = descendantMessageIds cmsg
@@ -751,10 +803,22 @@ _messageParent = (child, parent, position = null, oldParent = true, importing = 
           $set: root: root ? child
         ,
           multi: true
+        EmojiMessages.update
+          message: $in: descendants
+        ,
+          $set: root: root ? child
+        ,
+          multi: true
     else if cmsg.children?.length
       ## To reparent root message (with children),
       ## change the root of all descendants.
       Messages.update
+        root: child
+      ,
+        $set: root: root ? child  ## actually must be root
+      ,
+        multi: true
+      EmojiMessages.update
         root: child
       ,
         $set: root: root ? child  ## actually must be root
@@ -829,6 +893,8 @@ Meteor.methods
       deleted: Match.Optional Boolean
       private: Match.Optional Boolean
       minimized: Match.Optional Boolean
+      rotate: Match.Optional Match.Where (r) ->
+        typeof r == "number" and -180 < r <= 180
     user = Meteor.user()
     unless canPost group, parent, user
       throw new Meteor.Error 'messageNew.unauthorized',
@@ -1054,6 +1120,20 @@ Meteor.methods
         Messages.update child,
           $unset: root: ''
         _submessagesChanged child
+        descendants = descendantMessageIds child
+        if descendants.length > 0
+          Messages.update
+            _id: $in: descendants
+          ,
+            $set: root: child
+          ,
+            multi: true
+          EmojiMessages.update
+            message: $in: descendants
+          ,
+            $set: root: child
+          ,
+            multi: true
     
     ## Delete all associated files.
     MessagesDiff.find
@@ -1070,6 +1150,9 @@ Meteor.methods
         child: message
       , parent: message
       ]
+    ## Delete all emoji responses to this message.
+    EmojiMessages.remove
+      message: message
 
   threadPrivacy: (message, list) ->
     #check Meteor.userId(), String  ## should be done by 'canSuper'
@@ -1117,10 +1200,22 @@ Meteor.methods
       throw new Meteor.Error 'recomputeRoots.unauthorized',
         "Insufficient permissions to recompute roots in group '#{wildGroup}'"
     rootMessages().forEach (root) ->
+      EmojiMessages.update
+        message: root._id
+      ,
+        $set: root: null
+      ,
+        multi: true
       descendants = descendantMessageIds root
       if descendants.length > 0
         Messages.update
           _id: $in: descendants
+        ,
+          $set: root: root._id
+        ,
+          multi: true
+        EmojiMessages.update
+          message: $in: descendants
         ,
           $set: root: root._id
         ,

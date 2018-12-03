@@ -8,7 +8,8 @@
 @validGroup = (group) ->
   validKey(group) and group.charAt(0) != '*' and group.trim().length > 0
 
-@sortKeys = ['title', 'creator', 'published', 'updated', 'posts', 'subscribe']
+@sortKeys = ['title', 'creator', 'published', 'updated', 'posts', 'emoji',
+             'subscribe']
 
 @defaultSort =
   key: 'published'
@@ -54,14 +55,21 @@ if Meteor.isServer
    (role in (user?.rolesPartial?[escapeGroup(group?.name ? group)]?[message2root message] ? [])))
 
 @groupPartialMessagesWithRole = (group, role, user = Meteor.user()) ->
+  group = group.name if group.name?
   message \
   for own message, roles of user?.rolesPartial?[escapeGroup group] ? [] \
   when role in roles
 
 @memberOfGroup = (group, user = Meteor.user()) ->
-  escaped = escapeGroup group
+  escaped = escapeGroup (group?.name ? group)
   not _.isEmpty(user?.roles?[escaped]) or
   not _.isEmpty(user?.rolesPartial?[escaped])
+
+## General group features are available for all readable groups (including
+## anonymous groups) and all groups of which you are a full or partial member.
+@memberOfGroupOrReadable = (group, user = Meteor.user()) ->
+  memberOfGroup(group, user) or
+  groupRoleCheck group, 'read', user
 
 ## List all groups that the user is a member of.
 ## (Mimicking memberOfGroup above.)
@@ -160,8 +168,7 @@ if Meteor.isServer
       user = findUser @userId
       ## Publish members of all readable groups (including anonymous groups)
       ## and all groups of which you are a full or partial member.
-      if memberOfGroup(group, user) or
-         groupRoleCheck groupData, 'read', user
+      if memberOfGroupOrReadable groupData, user
         Meteor.users.find
           username: $in: groupMembers groupData
         ,
@@ -353,6 +360,13 @@ Meteor.methods
         key = (msg) -> userSortKey msg.creator
       when 'subscribe'
         key = (msg) -> subscribedToMessage msg
+      when 'emoji'
+        key = (msg) ->
+          sum = 0
+          if msg.emoji
+            for emoji, users of msg.emoji
+              sum += users.length
+          sum
       else
         key = mongosort
         #key = (msg) -> msg[mongosort]
