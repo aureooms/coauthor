@@ -1,0 +1,6 @@
+[Unit]
+Description=Run coauthor's backup once
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/sh %h/dev/coauthor/.backup/backup.sh

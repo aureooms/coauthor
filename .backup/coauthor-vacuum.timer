@@ -1,0 +1,9 @@
+[Unit]
+Description=Run coauthor vacuum on Sunday at 5AM
+
+[Timer]
+OnCalendar=Sun *-*-* 05:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

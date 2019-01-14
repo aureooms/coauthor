@@ -1,0 +1,6 @@
+[Unit]
+Description=Run coauthor's vacuum once
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash %h/dev/coauthor/.backup/vacuum.sh
