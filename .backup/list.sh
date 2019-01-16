@@ -2,4 +2,4 @@
 
 CLOUD='db' # dropbox
 
-rc ls "$CLOUD":coauthor-backup | cut -d' ' -f4 | cut -d'/' -f1 | sort
+rc lsf "$CLOUD":coauthor-backup | cut -d'/' -f1 | sort
