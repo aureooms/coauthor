@@ -66,7 +66,16 @@ if Meteor.isServer
   recurse message
   descendants
 
-naturallyVisibleQuery =
+@ancestorMessages = (message, self = false) ->
+  if self and message?
+    yield findMessage message
+  loop
+    message = findMessageParent message
+    break unless message?
+    yield message
+
+## Recompute this every time to make sure no one modifies it.
+naturallyVisibleQuery = ->
   published: $ne: false    ## published is false or Date
   deleted: $ne: true
   private: $ne: true
@@ -77,7 +86,7 @@ naturallyVisibleQuery =
     if user?.username
       re = atRe user
       $or: [
-        naturallyVisibleQuery
+        naturallyVisibleQuery()
       ,
         "authors.#{escapeUser user.username}": $exists: true
       ,
@@ -86,7 +95,7 @@ naturallyVisibleQuery =
         body: re
       ]
     else
-      naturallyVisibleQuery
+      naturallyVisibleQuery()
   ## Wild group case effectively unions over all groups
   ## (duplicating logic below when it helps make shorter queries).
   if group == wildGroup
@@ -690,7 +699,7 @@ _messageUpdate = (id, message, authors = null, old = null) ->
   message.updators = authors
   diff = _.clone message
   for author in authors
-    message["authors." + escapeUser author] = now
+    message["authors.#{escapeUser author}"] = now
   Messages.update id,
     $set: message
   diff.id = id
@@ -699,7 +708,7 @@ _messageUpdate = (id, message, authors = null, old = null) ->
   #_submessagesChanged old.root ? id
   ## In this special case, we can efficiently simulate the behavior of
   ## _submessagesChanged via a direct update to the root:
-  if Meteor.isServer and _consideredSubmessage message, old
+  if Meteor.isServer and (not old.root? or _consideredSubmessage message, old)
     rootUpdate = $max: submessageLastUpdate: message.updated
     if old.root? and not _consideredSubmessage old
       rootUpdate.$inc = submessageCount: 1  ## considered a new submessage
@@ -756,12 +765,10 @@ _messageParent = (child, parent, position = null, oldParent = true, importing = 
   ## This can happen only if we are making the message nonroot (parent
   ## nonnull) and the child has children of its own.
   if parent? and cmsg.children?.length
-    ancestor = pmsg
-    while ancestor?
+    for ancestor from ancestorMessages pmsg, true
       if ancestor._id == child
         throw new Meteor.Error 'messageParent.cycle',
           "Attempt to make #{child} its own ancestor (via #{parent})"
-      ancestor = findMessageParent ancestor
 
   oldPosition = null
   oldSiblingsBefore = null
@@ -785,12 +792,27 @@ _messageParent = (child, parent, position = null, oldParent = true, importing = 
   if parent?
     _messageAddChild child, parent, position
   if root != cmsg.root
-    Messages.update child,
-      $set: root: root
+    update = root: root
+    if group != cmsg.group
+      update.group = group
+      ## First MessagesDiff has the initial group; add Diff if it changes.
+      ## (Unclear whether we should track group at all, though.)
+      now = new Date
+      username = Meteor.user().username
+      MessagesDiff.insert
+        id: cmsg._id
+        group: cmsg.group
+        updated: now
+        updators: [username]
+      Messages.update child,
+        $set: _.extend {"authors.#{escapeUser username}": now}, update
+    else
+      Messages.update child,
+        $set: update
     EmojiMessages.update
       message: child
     ,
-      $set: root: root
+      $set: update
     ,
       multi: true
     if cmsg.root?
@@ -815,13 +837,13 @@ _messageParent = (child, parent, position = null, oldParent = true, importing = 
       Messages.update
         root: child
       ,
-        $set: root: root ? child  ## actually must be root
+        $set: update  # root: root ? child  ## actually must be root
       ,
         multi: true
       EmojiMessages.update
         root: child
       ,
-        $set: root: root ? child  ## actually must be root
+        $set: update  # root: root ? child  ## actually must be root
       ,
         multi: true
       _noLongerRoot child if root?

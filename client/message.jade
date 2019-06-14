@@ -22,13 +22,8 @@ template(name="message")
           p !{mentions}
       .subscribers.alert.alert-success
         p
-          b Users subscribed to notifications about this thread:
+          b Users who can read this message, and whether they are subscribed to notifications:
         p !{subscribers}
-      if nonsubscribers
-        .nonsubscribers.alert.alert-warning
-          p
-            b Users who can read this message but are not subscribed to notifications:
-          p !{nonsubscribers}
       if orphanCount
         .orphans.alert.alert-warning
           b
@@ -48,7 +43,7 @@ template(name="rootHeader")
             a.btn.btn-info.focusButton(aria-label="Focus", href="{{pathFor 'message' group=group message=_id}}")
               span.fas.fa-sign-in-alt(aria-hidden="true")
           span.space
-          span.title.panel-title.tex2jax !{formatTitle}&#8203;
+          span.title.panel-title.tex2jax !{formatTitleBold}&#8203;
           +messageTags
           +messageLabels
 
@@ -56,7 +51,7 @@ template(name="tableOfContentsRoot")
   nav.contents
     ul.nav.contents
       li
-        a(href="#{{_id}}", data-id=_id, class=messageClass).title.tex2jax.onMessageDrop !{formatTitle} [#{creator}]
+        a(href="#{{_id}}", data-id=_id, class=messageClass).title.tex2jax.onMessageDrop !{formatTitleBold} [#{creator}]
     +tableOfContents
 
 template(name="tableOfContents")
@@ -67,7 +62,7 @@ template(name="tableOfContents")
           +tableOfContentsMessage
 
 template(name="tableOfContentsMessage")
-  li.btn-group-xs
+  li.btn-group-xs(class=foldedClass)
     div.beforeMessageDrop(data-parent=parent, data-index=index)
     a(href="#{{_id}}", data-id=_id, class=messageClass).tex2jax.onMessageDrop
       if file
@@ -88,7 +83,7 @@ template(name="submessage")
     .panel-heading.clearfix
       unless history
         if editingRV
-          input.form-control.title(type="text", placeholder="Title", value=title, tabindex="{{tabindex 18}}")
+          input.form-control.title(type="text", placeholder="Title", value=editTitle, tabindex="{{tabindex 18}}")
       //-unless editingRV
       span(class=hideIfEditing)
         .messageTitle
@@ -102,12 +97,11 @@ template(name="submessage")
               a.btn.btn-info.focusButton(aria-label="Focus", href="{{pathFor 'message' group=group message=_id}}", draggable="true")
                 span.fas.fa-sign-in-alt(aria-hidden="true")
             if here
-              unless root
-                +messageNeighbors
+              +messageNeighbors
           span.space
           if file
             span.fas.fa-paperclip
-          span.title.panel-title.tex2jax !{formatTitle}&#8203;
+          span.title.panel-title.tex2jax !{formatTitleBold}&#8203;
           +messageTags
           +messageLabels
       //- http://stackoverflow.com/questions/22390272/how-to-create-a-label-with-close-icon-in-bootstrap
@@ -209,7 +203,10 @@ template(name="submessage")
                         a.privateButton(href="#")
                           button.btn.btn-danger.btn-block Make Private
             if editingRV
-              button.btn.btn-info.editButton(tabindex="{{tabindex 8}}") Stop Editing
+              if editStopping
+                button.btn.btn-info.editButton.disabled(tabindex="{{tabindex 8}}", title="Waiting for save to complete before stopping editing...") Stop Editing
+              else
+                button.btn.btn-info.editButton(tabindex="{{tabindex 8}}") Stop Editing
             else
               unless folded
                 if canEdit
@@ -219,8 +216,8 @@ template(name="submessage")
     unless folded
       if history
         +messageHistory forHistory
-      .editorAndBody.clearfix
-        .editorContainer(class=sideBySideClass)
+      .editorAndBody.clearfix(class=sideBySideClass)
+        .editorContainer
           unless history
             with nothing
               if editingRV
@@ -229,8 +226,9 @@ template(name="submessage")
             if editingRV
               unless previewSideBySide
                 +belowEditor editData
+                .resizer
         if preview
-          .bodyContainer(class=sideBySideClass)
+          .bodyContainer
             if file
               if editingRV
                 .fileDescription
@@ -251,11 +249,15 @@ template(name="submessage")
       if editingRV
         if previewSideBySide
           +belowEditor editData
+          .resizer
       .message-footer
         +messageAuthor
         .message-reply-buttons.clearfix.hidden-print
           if editingRV
-            button.btn.btn-info.editButton(tabindex="{{tabindex 8}}") Stop Editing
+            if editStopping
+              button.btn.btn-info.editButton.disabled(title="Waiting for save to complete before stopping editing...") Stop Editing
+            else
+              button.btn.btn-info.editButton Stop Editing
           +emojiButtons
           +replyButtons
       if childrenCount
@@ -277,36 +279,47 @@ template(name="submessage")
               +messageLabels
 
 template(name="messageNeighbors")
-  if prev
-    with prev
-      a.btn.btn-info(href="{{pathFor 'message' group=group message=_id}}")
-        span.fas.fa-backward(aria-hidden="true", data-toggle="tooltip", data-original-title=title)
+  if root
+    if parent
+      with parent
+        a.btn.btn-info(href="{{pathFor 'message' group=group message=_id}}#")
+          span.fas.fa-chevron-up(aria-hidden="true", data-toggle="tooltip", data-original-title=title)
   else
-    a.btn.btn-info.disabled
-      span.fas.fa-backward(aria-hidden="true")
-  if next
-    with next
-      a.btn.btn-info(href="{{pathFor 'message' group=group message=_id}}")
-        span.fas.fa-forward(aria-hidden="true", data-toggle="tooltip", data-original-title=title)
-  else
-    a.btn.btn-info.disabled
-      span.fas.fa-forward(aria-hidden="true")
+    if prev
+      with prev
+        a.btn.btn-info(href="{{pathFor 'message' group=group message=_id}}")
+          span.fas.fa-backward(aria-hidden="true", data-toggle="tooltip", data-original-title=title)
+    else
+      a.btn.btn-info.disabled
+        span.fas.fa-backward(aria-hidden="true")
+    if next
+      with next
+        a.btn.btn-info(href="{{pathFor 'message' group=group message=_id}}")
+          span.fas.fa-forward(aria-hidden="true", data-toggle="tooltip", data-original-title=title)
+    else
+      a.btn.btn-info.disabled
+        span.fas.fa-forward(aria-hidden="true")
 
 template(name="belowEditor")
   .belowEditor.clearfix
     .pull-right.btn-group
+      if changedHeight
+        button.btn.btn-xs.btn-warning.setHeight Set Default Height
       if preview
         if sideBySide
-          button.btn.btn-default.sideBySidePreview Top-Bottom Preview
+          button.btn.btn-default.sideBySidePreview Top-Bottom
         else
-          button.btn.btn-default.sideBySidePreview Side-by-Side Preview
-        button.btn.btn-default.togglePreview Disable Preview
+          button.btn.btn-default.sideBySidePreview Side-by-Side
+        button.btn.btn-default.togglePreview No Preview
       else
-        button.btn.btn-default.togglePreview Enable Preview
+        button.btn.btn-default.togglePreview Preview
     if saved
       .alert.alert-success.save-alert All changes saved.!{otherEditors}
     else
-      .alert.alert-danger.save-alert Unsaved changes.!{otherEditors}
+      if editStopping
+        .alert.alert-danger.save-alert Unsaved changes. Stopping editing once saved...!{otherEditors}
+      else
+        .alert.alert-danger.save-alert Unsaved changes. Saving...!{otherEditors}
 
 template(name="messageTags")
   span.messageTags
@@ -442,7 +455,8 @@ template(name="messageReplace")
 template(name="messageParentConfirm")
   .modal
     .modal-dialog.modal-lg.messageParentConfirm
-      .modal-content.flexColumn
+      .modal-content
+        //-.flexColumn
         .modal-header
           h2 Confirm Message Reparenting
         .modal-body.flexColumn
@@ -466,5 +480,6 @@ template(name="messageParentConfirm")
               with child
                 +readMessage
         .modal-footer
+          //-.flexColumn
           button.btn.btn-danger.messageParentButton Yes, reparent
           button.btn.btn-success.cancelButton.fullwidth Cancel

@@ -99,6 +99,12 @@ Template.registerHelper 'formatTitle', ->
 Template.registerHelper 'formatTitleOrUntitled', ->
   formatTitleOrFilename @, true
 
+Template.registerHelper 'formatTitleBold', ->
+  formatTitleOrFilename @, false, false, true
+
+Template.registerHelper 'formatTitleOrUntitledBold', ->
+  formatTitleOrFilename @, true, false, true
+
 Template.registerHelper 'formatBody', ->
   formatBody @format, @body
 
@@ -122,6 +128,7 @@ orphans = (message) ->
     _id: $nin: descendants
 
 authorCountHelper = (field) -> ->
+  tooltipUpdate()
   authors =
     for username, count of Session.get field
       continue unless count
@@ -138,14 +145,7 @@ Template.message.helpers
   authors: authorCountHelper 'threadAuthors'
   mentions: authorCountHelper 'threadMentions'
   subscribers: ->
-    users =
-      for user in sortedMessageSubscribers @_id
-        linkToAuthor @group, user
-    if users.length > 0
-      users.join ', '
-    else
-      '(none)'
-  nonsubscribers: ->
+    tooltipUpdate()
     subscribers = messageSubscribers @_id,
       fields: username: true
     subscribed = {}
@@ -158,18 +158,26 @@ Template.message.helpers
         roles: true
         rolesPartial: true
         'profile.notifications': true
-    (for user in users when user.username not of subscribed
-      unless user.emails?[0]?
-        title = "No email address"
-      else if not user.emails[0].verified
-        title = "Unverified email address #{user.emails[0].address}"
-      else if not (user.profile.notifications?.on ? defaultNotificationsOn)
-        title = "Notifications turned off"
-      else if not autosubscribe @group, user
-        title = "Autosubscribe turned off, and not explicitly subscribed to thread"
+    unless users.length
+      return '(none)'
+    (for user in users
+      title = "User '#{user.username}': " # like linkToAuthor
+      if user.username of subscribed
+        title += 'Subscribed to email notifications'
+        icon = '<span class="fas fa-check"></span> ' #text-success
       else
-        title = "Explicitly unsubscribed from thread"
-      linkToAuthor @group, user.username, title
+        icon = '<span class="fas fa-times"></span> ' #text-danger
+        unless user.emails?[0]?
+          title += "No email address"
+        else if not user.emails[0].verified
+          title += "Unverified email address #{user.emails[0].address}"
+        else if not (user.profile.notifications?.on ? defaultNotificationsOn)
+          title += "Notifications turned off"
+        else if not autosubscribe @group, user
+          title += "Autosubscribe turned off, and not explicitly subscribed to thread"
+        else
+          title += "Explicitly unsubscribed from thread"
+      linkToAuthor @group, user.username, title, icon
     ).join ', '
   orphans: ->
     orphans @_id
@@ -204,6 +212,13 @@ Template.message.onRendered ->
 editing = (self) ->
   Meteor.user()? and Meteor.user().username in (self.editing ? [])
 
+safeToStopEditing = ->
+  data = Template.currentData()
+  instance = Template.instance()
+  #data.editing.length > 1 or (
+  data.title == instance.editTitle.get() and
+  data.body == instance.editBody.get()
+
 idle = 1000   ## one second
 
 messageClass = ->
@@ -224,32 +239,39 @@ submessageCount = 0
 
 messageRaw = new ReactiveDict
 export messageFolded = new ReactiveDict
+defaultFolded = new ReactiveDict
 messageHistory = new ReactiveDict
 messageKeyboard = new ReactiveDict
 messagePreview = new ReactiveDict
+defaultHeight = 300
 @messagePreviewDefault = ->
   profile = Meteor.user().profile?.preview
   on: profile?.on ? true
   sideBySide: profile?.sideBySide ? false
+  height: profile?.height ? defaultHeight
 ## The following helpers should only be called when editing.
 ## They can be called in two settings:
 ##   * Within the submessage template, and possibly within a `with nothing`
 ##     data environment.  In this case, we use the `editing` ReactiveVar
 ##     to get the message ID, because we should be editing.
 ##   * From the betweenEditorAndBody subtemplate.  Then we can use `_id` data.
-messagePreviewGet = ->
-  if Template.instance().editing?
-    id = Template.instance().editing.get()
-  else
-    id = Template.currentData()._id
-  return unless id
+messagePreviewGet = (template = Template.instance()) ->
+  unless id?
+    id = template?.editing?.get()
+    unless id?
+      id = Template.currentData()?._id
+      unless id?
+        id = template?.data?._id
+        return unless id?
   messagePreview.get(id) ? messagePreviewDefault()
-messagePreviewSet = (change) ->
-  if Template.instance().editing?
-    id = Template.instance().editing.get()
-  else
-    id = Template.currentData()._id
-  return unless id
+messagePreviewSet = (change, template = Template.instance()) ->
+  unless id?
+    id = template?.editing?.get()
+    unless id?
+      id = Template.currentData()?._id
+      unless id?
+        id = template?.data?._id
+        return unless id?
   preview = messagePreview.get(id) ? messagePreviewDefault()
   messagePreview.set id, change preview
 
@@ -264,16 +286,39 @@ threadMentions = {}
 Template.submessage.onCreated ->
   @count = submessageCount++
   @editing = new ReactiveVar null
+  @editStopping = new ReactiveVar false
   @editTitle = new ReactiveVar null
   @editBody = new ReactiveVar null
+  @lastTitle = null
+  @savedTitles = []
+
   @autorun =>
     data = Template.currentData()
     return unless data?
     #@myid = data._id
     if editing data
-      @editing.set data._id
-      @editTitle.set data.title
-      @editBody.set data.body
+      ## Maintain @editing == this message's ID when message is being edited.
+      ## Also initialize title and body only when we start editing.
+      if data._id != @editing.get()
+        @editing.set data._id
+        @editTitle.set data.title
+        @editBody.set data.body
+      ## Update input's value when title changes on server
+      if data.title != @lastTitle
+        @lastTitle = data.title
+        ## Ignore an update that matches a title we sent to the server,
+        ## to avoid weird reversion while live typing with network delays.
+        ## (In steady state, we expect our saves to match later updates,
+        ## so this should acquiesce with an empty savedTitles.)
+        if data.title in @savedTitles
+          while @savedTitles.pop() != data.title
+            continue
+        else
+          ## Received new title: update input text, forget past saves,
+          ## and cancel any pending save.
+          @editTitle.set data.title
+          @savedTitles = []
+          Meteor.clearTimeout @timer
     else
       @editing.set null
 
@@ -293,115 +338,15 @@ Template.submessage.onCreated ->
     #console.log 'automathjax'
     automathjax()
 
-#Session.setDefault 'images', {}
-images = {}
-imagesInternal = {}
-id2template = {}
-scrollToLater = null
-fileQuery = null
-
-updateFileQuery = _.debounce ->
-  fileQuery.stop() if fileQuery?
-  fileQuery = Messages.find
-    _id: $in: _.keys images
-  ,
-    fields: file: true
-  .observeChanges
-    added: (id, fields) ->
-      images[id].file = fields.file
-      initImageInternal images[id].file, id if images[id].file?
-    changed: (id, fields) ->
-      if fields.file? and images[id].file != fields.file
-        if fileType(fields.file) in ['image', 'video']
-          forceImgReload urlToFile id
-        imagesInternal[images[id].file].image = null if images[id].file?
-        images[id].file = fields.file
-        initImageInternal images[id].file, id if images[id].file?
-, 50
-
-initImage = (id) ->
-  if id not of images
-    images[id] =
-      count: 0
-      file: null
-    updateFileQuery()
-
-initImageInternal = (id, image = null) ->
-  if id not of imagesInternal
-    imagesInternal[id] =
-      count: 0
-      image: image
-  else if image?
-    imagesInternal[id].image = image
-
-checkImage = (id) ->
-  return unless id of images
-  ## Image gets unnaturally folded if it's referenced at least once.
-  messageFolded.set id, images[id].naturallyFolded or
-    images[id].count > 0 or
-    (imagesInternal[images[id].file]? and
-     imagesInternal[images[id].file].count > 0)
-  ## No longer care about this image if it's not referenced and doesn't have
-  ## a rendered template.
-  if images[id].count == 0 and id not of id2template
-    delete images[id]
-    updateFileQuery()
-
-checkImageInternal = (id) ->
-  image = imagesInternal[id].image
-  checkImage image if image?
-
-messageDrag = (target, bodyToo = true, old) ->
-  return unless target
-  onDragStart = (e) =>
-    #url = "coauthor:#{@data._id}"
-    url = urlFor 'message',
-      group: @data.group
-      message: @data._id
-    e.dataTransfer.effectAllowed = 'linkMove'
-    e.dataTransfer.setData 'text/plain', url
-    e.dataTransfer.setData 'application/coauthor-id', @data._id
-    e.dataTransfer.setData 'application/coauthor-type', type
-  type = 'message'
-  if @data.file
-    type = fileType @data.file
-    #console.log @data.file, type
-    #if "class='odd-file'" not in formatted and
-    #   "class='bad-file'" not in formatted
-    #  url = formatted
-    if bodyToo
-      $(@find '.message-file')?.find('img, video, a, canvas')?.each (i, elt) =>
-        elt.removeEventListener 'dragstart', old if old?
-        elt.addEventListener 'dragstart', onDragStart
-  target.removeEventListener 'dragstart', old if old?
-  target.addEventListener 'dragstart', onDragStart
-  onDragStart
-
-## A message is "naturally" folded if it is flagged as minimized or deleted.
-## It still will be default-folded if it's an image referenced in another
-## message that is not naturally folded.
-export naturallyFolded = (data) -> data.minimized or data.deleted
-
-Template.submessage.onRendered ->
-  ## Random message background color (to show nesting).
-  #@firstNode.style.backgroundColor = '#' +
-  #  Math.floor(Math.random() * 25 + 255 - 25).toString(16) +
-  #  Math.floor(Math.random() * 25 + 255 - 25).toString(16) +
-  #  Math.floor(Math.random() * 25 + 255 - 25).toString(16)
-
-  ## Drag/drop support.
-  focusButton = $(@find '.message-left-buttons').find('.focusButton')[0]
-  @autorun =>
-    listener = messageDrag.call @, focusButton, true, listener
-
-  ## Fold naturally folded (minimized and deleted) messages
-  ## by default on initial load.
-  messageFolded.set @data._id, true if natural = naturallyFolded @data
+  ## Fold naturally folded (minimized and deleted) messages by default on
+  ## initial load.  But only if not previously manually overridden.
+  oldDefault = defaultFolded.get @data._id
+  oldFolded = messageFolded.get @data._id
+  defaultFolded.set @data._id, naturallyFolded @data
 
   ## Fold referenced attached files by default on initial load.
   #@$.children('.panel').children('.panel-body').find('a[href|="/file/"]')
   #console.log @$ 'a[href|="/file/"]'
-  scrollToMessage @data._id if scrollToLater == @data._id
   #images = Session.get 'images'
   @images = {}
   @imagesInternal = {}
@@ -415,6 +360,7 @@ Template.submessage.onRendered ->
     id2template[data._id] = @
     ## If message is naturally folded, don't count images it references.
     images[data._id].naturallyFolded = naturallyFolded data
+    images[data._id].children = data.children?.length
     if images[data._id].naturallyFolded
       for id of @images
         images[id].count -= 1
@@ -467,12 +413,153 @@ Template.submessage.onRendered ->
           checkImageInternal id
       @imagesInternal = newImagesInternal
 
+  ## Switch messageFolded to defaultFolded if:
+  ## * default has changed
+  ## * default has initialized but messageFolded not already set
+  ##   (e.g. because we just clicked the message)
+  if oldFolded? and (not oldDefault? or oldDefault == defaultFolded.get @data._id)
+    unless oldFolded == messageFolded.get @data._id
+      messageFolded.set @data._id, oldFolded
+  else
+    messageFolded.set @data._id, defaultFolded.get @data._id
+
+#Session.setDefault 'images', {}
+images = {}
+imagesInternal = {}
+id2template = {}
+scrollToLater = null
+fileQuery = null
+
+updateFileQuery = _.debounce ->
+  fileQuery.stop() if fileQuery?
+  fileQuery = Messages.find
+    _id: $in: _.keys images
+  ,
+    fields: file: true
+  .observeChanges
+    added: (id, fields) ->
+      #console.log "#{id} added:", fields
+      images[id].file = fields.file
+      if images[id].file?
+        initImageInternal images[id].file, id
+        checkImageInternal images[id].file
+    changed: (id, fields) ->
+      #console.log "#{id} changed:", fields
+      if fields.file? and images[id].file != fields.file
+        if fileType(fields.file) in ['image', 'video']
+          forceImgReload urlToFile id
+        imagesInternal[images[id].file].image = null if images[id].file?
+        images[id].file = fields.file
+        if images[id].file?
+          initImageInternal images[id].file, id
+          checkImageInternal images[id].file
+, 250
+
+initImage = (id) ->
+  if id not of images
+    images[id] =
+      count: 0
+      file: null
+    updateFileQuery()
+
+initImageInternal = (id, image = null) ->
+  #console.log "initImageInternal #{id}, #{image}"
+  if id not of imagesInternal
+    imagesInternal[id] =
+      count: 0
+      image: image
+  else if image?
+    imagesInternal[id].image = image
+
+checkImage = (id) ->
+  return unless id of images
+  ## Image gets unnaturally folded if it's referenced at least once
+  ## and doesn't have any children (don't want to hide children, and this
+  ## can also lead to infinite loop if children has the image reference).
+  newDefault = images[id].naturallyFolded or
+    (not images[id].children and
+     (images[id].count > 0 or
+      (imagesInternal[images[id].file]? and
+       imagesInternal[images[id].file].count > 0)))
+  if newDefault != defaultFolded.get id
+    defaultFolded.set id, newDefault
+    messageFolded.set id, newDefault
+  ## No longer care about this image if it's not referenced and doesn't have
+  ## a rendered template.
+  if images[id].count == 0 and id not of id2template
+    delete images[id]
+    updateFileQuery()
+
+checkImageInternal = (id) ->
+  image = imagesInternal[id].image
+  #console.log "#{id} corresponds to #{image}"
+  checkImage image if image?
+
+messageDrag = (target, bodyToo = true, old) ->
+  return unless target
+  onDragStart = (e) =>
+    #url = "coauthor:#{@data._id}"
+    url = urlFor 'message',
+      group: @data.group
+      message: @data._id
+    e.dataTransfer.effectAllowed = 'linkMove'
+    e.dataTransfer.setData 'text/plain', url
+    e.dataTransfer.setData 'application/coauthor-id', @data._id
+    e.dataTransfer.setData 'application/coauthor-type', type
+  type = 'message'
+  if @data.file
+    type = fileType @data.file
+    #console.log @data.file, type
+    #if "class='odd-file'" not in formatted and
+    #   "class='bad-file'" not in formatted
+    #  url = formatted
+    if bodyToo
+      $(@find '.message-file')?.find('img, video, a, canvas')?.each (i, elt) =>
+        elt.removeEventListener 'dragstart', old if old?
+        elt.addEventListener 'dragstart', onDragStart
+  target.removeEventListener 'dragstart', old if old?
+  target.addEventListener 'dragstart', onDragStart
+  onDragStart
+
+## A message is "naturally" folded if it is flagged as minimized or deleted.
+## It still will be default-folded if it's an image referenced in another
+## message that is not naturally folded.
+export naturallyFolded = (data) -> data.minimized or data.deleted
+
+Template.submessage.onRendered ->
+  ## Random message background color (to show nesting).
+  #@firstNode.style.backgroundColor = '#' +
+  #  Math.floor(Math.random() * 25 + 255 - 25).toString(16) +
+  #  Math.floor(Math.random() * 25 + 255 - 25).toString(16) +
+  #  Math.floor(Math.random() * 25 + 255 - 25).toString(16)
+
+  ## Drag/drop support.
+  focusButton = $(@find '.message-left-buttons').find('.focusButton')[0]
+  @autorun =>
+    listener = messageDrag.call @, focusButton, true, listener
+
+  ## Scroll to this message if it's been requested.
+  if scrollToLater == @data._id
+    scrollToMessage @data._id
+
   ## Image rotation
   @autorun =>
     data = Template.currentData()
     messageImageTransform.call @
   window.addEventListener 'resize',
     _.debounce (=> messageImageTransform.call @), 100
+
+  ## Update side-by-side height settings when leaving editing mode
+  ## and/or changing side-by-side preview setting.
+  @autorun =>
+    preview = messagePreviewGet()
+    return unless preview?
+    @editor?.setSize null, preview.height
+    @$('.bodyContainer').first().height \
+      if @editing.get() and preview.sideBySide
+        preview.height
+      else
+        'auto'
 
 ## Cache EXIF orientations, as files should be static
 image2orientation = {}
@@ -507,14 +594,21 @@ image2orientation = {}
 scrollDelay = 750
 
 @scrollToMessage = (id) ->
+  if id[0] == '#'
+    id = id[1..]
   if id of id2template
     template = id2template[id]
-    $.scrollTo template.firstNode, scrollDelay,
-      easing: 'swing'
-      onAfter: ->
+    $('html, body').animate
+      scrollTop: template.firstNode.offsetTop
+    , 200, 'swing', ->
         $(template.find 'input.title').focus()
   else
     scrollToLater = id
+    ## Unfold ancestors of clicked message so that it becomes visible.
+    for ancestor from ancestorMessages id
+      messageFolded.set ancestor._id, false
+  ## Also unfold message itself, because you probably want to see it.
+  messageFolded.set id, false
 
 Template.submessage.onDestroyed ->
   delete id2template[@data._id]
@@ -566,6 +660,8 @@ Template.submessage.helpers
   nothing: {}
   editingRV: -> Template.instance().editing.get()
   editingNR: -> Tracker.nonreactive -> Template.instance().editing.get()
+  editStopping: -> Template.instance().editStopping.get()
+  editTitle: -> Template.instance().editTitle.get()
   editData: ->
     #_.extend @,
     _id: @_id
@@ -573,6 +669,7 @@ Template.submessage.helpers
     body: @body
     group: @group
     editing: @editing  ## to list other editors
+    editStopping: Template.instance().editStopping.get()
     editTitle: Template.instance().editTitle.get()
     editBody: Template.instance().editBody.get()
   hideIfEditing: ->
@@ -583,12 +680,14 @@ Template.submessage.helpers
   #myid: -> Tracker.nonreactive -> Template.instance().myid
   #editing: -> editing @
   config: ->
+    height = Tracker.nonreactive -> messagePreviewGet()?.height
     ti = Tracker.nonreactive -> Template.instance()
     (editor) =>
       #console.log 'config', editor.getValue(), '.'
       ti.editor = editor
       switch sharejsEditor
         when 'cm'
+          editor.setSize null, height
           editor.getInputField().setAttribute 'tabindex', 1 + 20 * ti.count + 19
           ## styleActiveLine is currently buggy on Android.
           if 0 > navigator.userAgent.toLowerCase().indexOf 'android'
@@ -604,53 +703,67 @@ Template.submessage.helpers
             'CodeMirror-foldgutter'
           ]
           editor.setOption 'theme',
-            switch theme()
+            switch themeEditor()
               when 'dark'
                 'blackboard'
               when 'light'
                 'eclipse'
               else
-                theme()
+                themeEditor()
+          pasteHTML = false
           editor.setOption 'extraKeys',
-            Enter: 'newlineAndIndentContinueMarkdownList'
+            Enter: 'xnewlineAndIndentContinueMarkdownList'
             End: 'goLineRight'
             Home: 'goLineLeft'
+            "Shift-Ctrl-H": (cm) ->
+              pasteHTML = not pasteHTML
+              if pasteHTML
+                console.log 'HTML pasting mode turned on.'
+              else
+                console.log 'HTML pasting mode turned off.'
           cmDrop = editor.display.dragFunctions.drop
           editor.setOption 'dragDrop', false
           editor.display.dragFunctions.drop = (e) ->
-            #text = e.dataTransfer.getData 'text'
+            text = e.dataTransfer?.getData 'text'
             id = e.dataTransfer?.getData 'application/coauthor-id'
             username = e.dataTransfer?.getData 'application/coauthor-username'
             type = e.dataTransfer?.getData 'application/coauthor-type'
-            if id or username
+            if username
+              replacement = "@#{username}"
+            else if id
+              switch type
+                when 'image', 'video', 'pdf'
+                  switch ti.data.format
+                    when 'markdown'
+                      replacement = "![](coauthor:#{id})"
+                    when 'latex'
+                      replacement = "\\includegraphics{coauthor:#{id}}"
+                    when 'html'
+                      replacement = """<img src="coauthor:#{id}">"""
+                #when 'video'
+                #  """<video controls><source src="coauthor:#{id}"></video>"""
+                else
+                  replacement = "coauthor:#{id}"
+            else if match = parseCoauthorMessageUrl text
+              replacement = "coauthor:#{match.message}"
+            else if match = parseCoauthorAuthorUrl text
+              replacement = "@#{match.author}"
+            else
+              replacement = text
+            if replacement?
               e.preventDefault()
               e = _.omit e, 'dataTransfer', 'preventDefault'
               e.defaultPrevented = false
               e.preventDefault = ->
               e.dataTransfer =
-                getData: ->
-                  if username
-                    return "@#{username}"
-                  switch type
-                    when 'image', 'video', 'pdf'
-                      switch ti.data.format
-                        when 'markdown'
-                          "![](coauthor:#{id})"
-                        when 'latex'
-                          "\\includegraphics{coauthor:#{id}}"
-                        when 'html'
-                          """<img src="coauthor:#{id}">"""
-                    #when 'video'
-                    #  """<video controls><source src="coauthor:#{id}"></video>"""
-                    else
-                      "coauthor:#{id}"
+                getData: -> replacement
             cmDrop e
           editor.setOption 'dragDrop', true
 
           paste = null
           editor.on 'paste', (cm, e) ->
             paste = null
-            if 'text/html' in e.clipboardData.types
+            if pasteHTML and 'text/html' in e.clipboardData.types
               paste = e.clipboardData.getData 'text/html'
               .replace /<!--.*?-->/g, ''
               .replace /<\/?(html|head|body|meta)\b[^<>]*>/ig, ''
@@ -691,19 +804,61 @@ Template.submessage.helpers
               change.text = paste
               paste = null
 
+          lastAtWord = (cm) ->
+            cursor = cm.getCursor()
+            return null unless cursor.ch
+            text = cm.getRange
+              line: cursor.line
+              ch: 0
+            , cursor
+            (/@[^\s@]*$/.exec text)?[0]
+          users = null
+          editor.on 'keyup', (cm, e) ->
+            if (e.key.length == 1 or e.key == 'Backspace') and ## regular typing
+               (word = lastAtWord cm)?  ## completable @mention
+              word = word[1..]
+              cm.showHint
+                completeSingle: false
+                hint: (cm) -> new Promise (callback) ->
+                  users ?= _.sortBy (
+                    (Meteor.users.find {}, fields:
+                      username: 1
+                      "profile.fullname": 1
+                    ).map (user) ->
+                      display = user.username
+                      if user.profile.fullname
+                        display += " (#{user.profile.fullname})"
+                      lower = display.toLowerCase()
+                      text: user.username + ' '
+                      displayText: display
+                      sort: lower
+                      search: lower.replace /\s/g, ''
+                  ), 'sort'
+                  matches = (user for user in users \
+                    when user.search.includes word.toLowerCase())
+                  cursor = cm.getCursor()
+                  callback
+                    list: matches
+                    from:
+                      line: cursor.line
+                      ch: cursor.ch - word.length
+                    to: cursor
+            else
+              cm.execCommand 'closeHint'
+
         when 'ace'
           editor.textInput.getElement().setAttribute 'tabindex', 1 + 20 * ti.count + 19
           #editor.meteorData = @  ## currently not needed, also dunno if works
           editor.$blockScrolling = Infinity
           #editor.on 'change', onChange
           editor.setTheme 'ace/theme/' +
-            switch theme()
+            switch themeEditor()
               when 'dark'
                 'vibrant_ink'
               when 'light'
                 'chrome'
               else
-                theme()
+                themeEditor()
           editor.setShowPrintMargin false
           editor.setBehavioursEnabled true
           editor.setShowFoldWidgets true
@@ -729,12 +884,13 @@ Template.submessage.helpers
     else
       ''
   title: historify 'title'
-  formatTitle: ->
+  formatTitle: historifiedFormatTitle = (bold = false) ->
     history = messageHistory.get(@_id) ? @
     if messageRaw.get @_id
       "<CODE CLASS='raw'>#{_.escape history.title}</CODE>"
     else
-      formatTitleOrFilename history, false  ## don't write (untitled)
+      formatTitleOrFilename history, false, false, bold  ## don't say (untitled)
+  formatTitleBold: -> historifiedFormatTitle.call @, true
   formatBody: ->
     #console.log 'rendering', @_id
     history = messageHistory.get(@_id) ? @
@@ -795,7 +951,7 @@ Template.submessage.helpers
     preview = messagePreviewGet()
     preview?.on and preview?.sideBySide
   sideBySideClass: ->
-    if Template.instance().editing
+    if Template.instance().editing.get()
       preview = messagePreviewGet()
       if preview? and preview.on and preview.sideBySide
         'sideBySide'
@@ -818,6 +974,13 @@ Template.messageLabels.helpers
   private: historify 'private'
 
 Template.messageNeighbors.helpers
+  parent: ->
+    if @_id
+      tooltipUpdate()
+      findMessageParent @_id
+      #parent = findMessageParent @_id
+      #parent.child = @_id
+      #parent
   prev: ->
     tooltipUpdate()
     messageNeighbors(@)?.prev
@@ -828,9 +991,13 @@ Template.messageNeighbors.helpers
 Template.belowEditor.helpers
   preview: -> messagePreviewGet()?.on
   sideBySide: -> messagePreviewGet()?.sideBySide
+  changedHeight: ->
+    height = messagePreviewGet()?.height
+    height? and height != (Meteor.user()?.profile?.preview?.height ? defaultHeight)
   saved: ->
     @title == @editTitle and @body == @editBody
   otherEditors: ->
+    tooltipUpdate()
     others = _.without @editing, Meteor.user()?.username
     if others.length > 0
       " Editing with #{(linkToAuthor @group, other for other in others).join ', '}."
@@ -852,13 +1019,21 @@ Template.registerHelper 'messagePanelClass', ->
     classes.push 'editing'
   classes.join ' '
 
+Template.registerHelper 'foldedClass', ->
+  if (not here @_id) and messageFolded.get @_id
+    'folded'
+  else
+    ''
+
 Template.registerHelper 'formatCreator', ->
+  tooltipUpdate()
   linkToAuthor @group, @creator
 
 Template.registerHelper 'creator', ->
   displayUser @creator
 
 Template.registerHelper 'formatAuthors', ->
+  tooltipUpdate()
   a = for own author, date of @authors when author != @creator or date.getTime() != @created.getTime()
         "#{linkToAuthor @group, unescapeUser author} #{formatDate date, 'on '}"
   if a.length > 0
@@ -939,9 +1114,18 @@ Template.submessage.events
   'click .editButton': (e, t) ->
     e.preventDefault()
     e.stopPropagation()
-    message = t.data._id  #e.target.getAttribute 'data-message'
+    message = @_id  #e.target.getAttribute 'data-message'
     if editing @
-      Meteor.call 'messageEditStop', message
+      stop = -> Meteor.call 'messageEditStop', message
+      if safeToStopEditing()
+        stop()
+      else
+        t.editStopping.set true
+        t.autorun (computation) ->
+          if safeToStopEditing()
+            t.editStopping.set false
+            stop()
+            computation.stop()
     else
       Meteor.call 'messageEditStart', message
 
@@ -1016,10 +1200,12 @@ Template.submessage.events
     e.stopPropagation()
     message = t.data._id
     Meteor.clearTimeout t.timer
-    t.editTitle.set e.target.value
+    newTitle = e.target.value
+    t.editTitle.set newTitle
     t.timer = Meteor.setTimeout ->
+      t.savedTitles.push newTitle
       Meteor.call 'messageUpdate', message,
-        title: e.target.value
+        title: newTitle
     , idle
 
   'click .replyButton': (e, t) ->
@@ -1061,6 +1247,27 @@ Template.submessage.events
     e.preventDefault()
     e.stopPropagation()
 
+  'click .setHeight': (e, t) ->
+    e.preventDefault()
+    e.stopPropagation()
+    Meteor.users.update Meteor.userId(),
+      $set: "profile.preview.height": messagePreviewGet()?.height
+
+  'mousedown .resizer': (start, t) ->
+    $(start.target).addClass 'active'
+    oldHeight = t.$('.CodeMirror').height()
+    $(document).mousemove mover = (move) ->
+      messagePreviewSet ((preview) -> _.extend {}, preview,
+        height: Math.max 100, oldHeight + move.clientY - start.clientY
+      ), t
+    cancel = (e) ->
+      $(start.target).removeClass 'active'
+      $(document).off 'mousemove', mover
+      $(document).off 'mouseup', cancel
+      $(document).off 'mouseleave', cancel
+    $(document).mouseup cancel
+    $(document).mouseleave cancel
+
 Template.superdelete.events
   'click .shallowSuperdeleteButton': (e, t) ->
     e.preventDefault()
@@ -1086,24 +1293,24 @@ Template.messageHistory.onCreated ->
   @diffsub = @subscribe 'messages.diff', @data._id
 
 Template.messageHistory.onRendered ->
-  @autorun =>
-    diffs = MessagesDiff.find
-        id: @data._id
-      ,
-        sort: ['updated']
-      .fetch()
-    return if diffs.length < 2  ## don't show a zero-length slider
-    ## Accumulate diffs
-    for diff, i in diffs
-      if i >= 0
-        for own key, value of diffs[i-1]
-          unless key of diff
-            diff[key] = value
-      ## Remove diff IDs
-      delete diff._id
-    @slider?.destroy()
-    `import('bootstrap-slider')`.then (Slider) =>
-      Slider = Slider.default
+  `import('bootstrap-slider')`.then (Slider) =>
+    Slider = Slider.default
+    @autorun =>
+      @slider?.destroy()
+      diffs = MessagesDiff.find
+          id: @data._id
+        ,
+          sort: ['updated']
+        .fetch()
+      return if diffs.length < 2  ## don't show a zero-length slider
+      ## Accumulate diffs
+      for diff, i in diffs
+        if i >= 0
+          for own key, value of diffs[i-1]
+            unless key of diff
+              diff[key] = value
+        ## Remove diff IDs
+        delete diff._id
       @slider = new Slider @$('input')[0],
         #min: 0                 ## min and max not needed when using ticks
         #max: diffs.length-1
@@ -1121,7 +1328,7 @@ Template.messageHistory.onRendered ->
       #@slider.off 'change'
       @slider.on 'change', (e) =>
         messageHistory.set @data._id, diffs[e.newValue]
-    messageHistory.set @data._id, diffs[diffs.length-1]
+      messageHistory.set @data._id, diffs[diffs.length-1]
 
 uploader = (template, button, input, callback) ->
   Template[template].events {

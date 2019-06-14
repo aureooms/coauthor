@@ -29,8 +29,9 @@ in other fields too.
 * Three **formats** for writing messages (and easy to add additional formats).
   All formats support LaTeX math (via `$...$`, `$$...$$`, `\(...\)`, `\[...\]`,
   or `\begin{align/equation/eqnarray}...\end{align/equation/eqnarray}`)
-  via [KaTeX](https://khan.github.io/KaTeX/), so math mode supports
-  [this list of supported functions](https://khan.github.io/KaTeX/function-support.html).
+  via [KaTeX](https://katex.org/), so math mode supports
+  [this list of supported functions](https://katex.org/docs/supported.html)
+  (see also [this support table](https://katex.org/docs/support_table.html)).
   Macros defined with `\gdef` can be used throughout one message.
 
   * [Github-style Markdown](https://guides.github.com/features/mastering-markdown/)
@@ -44,15 +45,15 @@ in other fields too.
   * LaTeX, limited.  Beyond extensive math mode support (see below),
     the following features are supported in text mode; feel free to ask
     for more.  `%...`, `\def\macro{...}`, `\let\macro=\mac`, `\protect`,
-    `\emph`, `\textit`, `\textup`, `\textnormal`, `\textrm`, `\textlf`,
+    `\sout`, `\emph`, `\textit`, `\textup`, `\textnormal`, `\textrm`, `\textlf`,
     `\textmd`, `\textbf`, `\textsf`, `\texttt`, `\textsc`, `\textsl`,
     `\em`, `\itshape`, `\upshape`, `\rmfamily`, `\lfseries`, `\mdseries`,
     `\bfseries`, `\rmfamily`, `\sffamily`, `\ttfamily`, `\scshape`, `\slshape`,
     `\rm`, `\normalfont`, `\md`, `\bf`, `\it`, `\sl`, `\sf`, `\tt`, `\sc`,
     `\bfseries`, `\itseries`, `\mdseries`, `\sffamily`, `\slshape`,
-    `\scshape`, `\ttfamily`, `\uppercase`, `\MakeTextUppercase`,
-    `\lowercase`, `\MakeTextLowercase`, `\underline`,
-    `\textcolor{color}{text}`, `\colorbox{backcolor}{text}`,
+    `\scshape`, `\ttfamily`, `\centering`, `\raggedright`, `\raggedleft`,
+    `\uppercase`, `\MakeTextUppercase`, `\lowercase`, `\MakeTextLowercase`,
+    `\underline`, `\textcolor{color}{text}`, `\colorbox{backcolor}{text}`,
     `\url`, `\href{url}{text}`, `\pdftooltip{hovertext}{text}`,
     `\raisebox{amount}{text}`, `\par`,
     `\BY{...}`, `\YEAR{...}`,
@@ -63,9 +64,11 @@ in other fields too.
     `\textasciitilde`, `\textasciicircum`, `\textbackslash`,
     `\textellipsis`, `\dots`, `\ldots`,
     `\&`, `\$`, `\{`, `\}`, `\%`, `\#`, ``` `` ```, `''`,
-    `~`, `--`, `---`, `{`, `}`, `\\`, `\item`;
-    `\begin/\end` for environments `verbatim`, `enumerate`, `itemize`,
-    `quote`, `tabular` (basic),
+    `~`, `--`, `---`, `{`, `}`, `\\`, `\item`, `\item[...]`;
+    `\begin/\end` for environments `verbatim`, `itemize`,
+    `enumerate` (including [enumerate.sty's optional argument](http://ctan.mirrors.hoobly.com/macros/latex/required/tools/enumerate.pdf))
+    `quote`, `center`,
+    `tabular` (basic but including `\multicolumn` and `\multirow`),
     `equation`, `eqnarray`, `align`,
     `problem`, `question`, `idea`, `theorem`, `conjecture`, `lemma`,
     `corollary`, `fact`, `observation`, `proposition`, `claim`, `proof`.
@@ -80,11 +83,22 @@ in other fields too.
     attributes `title`, `style`, `class`, `aria-*`.
     Also supports LaTeX math mode.
 
+* Light and dark themes available under Settings.
+
 * [CodeMirror editor](http://codemirror.net/) supports syntax highlighting,
   block folding, bracket matching, line numbering, light and dark themes,
-  [spell checking](https://github.com/NextStepWebs/codemirror-spell-checker),
+  [spell checking](https://github.com/edemaine/codemirror-spell-checker),
   "regular" keybindings as well as Vim and Emacs keybindings
-  (if you've ever needed rectangular selection for e.g. ASCII art).
+  (especially useful for rectangular selection for e.g. ASCII art),
+  multiple cursors for simultaneous editing (ctrl-click).
+
+  * **Copy/paste** produces text by default.  Special handling of Coauthor
+    URLs produces `coauthor:...` links or embeds images.  Special handling of
+    user URLs produces @mentions.  To paste rich text, you can toggle HTML
+    paste mode via Ctrl-Shift-H.
+  * @mentioning has automatic completion of all users in group. You can type
+    any substring of the real name or username (but skipping spaces, like
+    Github), and select by pressing enter, or ignore by pressing space.
 
 * Messages are organized by **groups** (intended to correspond to groups of
   people who meet), so it's easy to share material with everyone in the group.
@@ -194,11 +208,16 @@ in other fields too.
   maximum collaboration), **private** replies only (useful for solved
   problems/puzzles, to prevent accidentally spoiling the fun), or
   **public and private** replies (useful for feedback on lectures, for example,
-  which can have varying relevance to the entire group).  Replies to replies
-  inherit the public/private state of their parent.  Superusers can
-  see all the messages and change them between public and private.
-  Private messages can @-mention another user (via `@username` in the body)
-  to allow them to see and jointly edit the message.
+  which can have varying relevance to the entire group).
+  * Replies to replies inherit the public/private state of their parent.
+  * Superusers can see all the messages and change them between public and
+    private.
+
+* Private, unpublished, or deleted messages can **@-mention** another user
+  (via `@username` in the title or body) to allow them to see and jointly
+  edit the message.  Note, however, that permissions are not inherited by
+  children: replies will also need to @-mention other users to give them
+  access.
 
 * **Email notifications** for subscribed threads, clustering together all
   updates since the last email, with a maximum lag a specified number of

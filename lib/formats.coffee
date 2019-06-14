@@ -1,6 +1,8 @@
 katex = require 'katex'
 katex.__defineMacro '\\epsilon', '\\varepsilon'
 
+romanNumeral = require 'roman-numeral'
+
 @availableFormats = ['markdown', 'latex', 'html']
 @mathjaxFormats = availableFormats
 
@@ -10,6 +12,16 @@ if Meteor.isClient
       format: format
       active: if Template.currentData()?.format == format then 'active' else ''
       capitalized: capitalize format
+
+escapeForHTML = (s) ->
+  s
+  .replace /&/g, '&amp;'
+  .replace /</g, '&lt;'
+  .replace />/g, '&gt;'
+
+escapeForQuotedHTML = (s) ->
+  escapeForHTML s
+  .replace /"/g, '&quot;'
 
 ## Finds all $...$ and $$...$$ blocks, where ... properly deals with balancing
 ## braces (e.g. $\hbox{$x$}$) and escaped dollar signs (\$ doesn't count as $),
@@ -83,6 +95,8 @@ replaceMathBlocks = (text, replacer) ->
     text
 
 @inTag = (string, offset) ->
+  ## Known issue: `<a title=">"` looks like a terminated tag to this code.
+  ## This is why `escapeForQuotedHTML` escapes >s.
   open = string.lastIndexOf '<', offset
   if open >= 0
     close = string.lastIndexOf '>', offset
@@ -104,11 +118,13 @@ latexSymbols =
 latexSymbolsRe = ///#{_.keys(latexSymbols).join '|'}///g
 latexEscape = (x) ->
   x.replace /[-`'~\\$%&<>]/g, (char) -> "&##{char.charCodeAt 0};"
+latexURL = (x) ->
+  x.replace /\\([_#@$%&])/g, '$1'
 
 defaultFontFamily = 'Merriweather'
-lightWeight = 300
-mediumWeight = 700
-boldWeight = 900
+lightWeight = 100
+mediumWeight = 400
+boldWeight = 700
 
 ## Convert verbatim environment, \url, and \href commands to HTML.
 ## These are special (and generally must happen first) because they can have
@@ -118,8 +134,12 @@ latex2htmlVerb = (tex) ->
   tex.replace /\\begin\s*{verbatim}([^]*?)\\end\s*{verbatim}/g,
     (match, verb) -> "<pre>#{latexEscape verb}</pre>"
   .replace /\\url\s*{([^{}]*)}/g, (match, url) ->
+    url = latexURL url
     """<a href="#{url}">#{latexEscape url}</a>"""
-  .replace /\\href\s*{([^{}]*)}\s*{((?:[^{}]|{[^{}]*})*)}/g, '<a href="$1">$2</a>'
+  .replace /\\href\s*{([^{}]*)}\s*{((?:[^{}]|{[^{}]*})*)}/g,
+    (match, url, text) ->
+      url = latexURL url
+      """<a href="#{url}">#{text}</a>"""
 
 ## Remove comments, stripping newlines from the input.
 latexStripComments = (text) ->
@@ -152,6 +172,11 @@ latex2htmlDef = (tex) ->
       tex = tex.replace r, (match, def) -> defs[def]
   tex
 
+texAlign =
+  raggedleft: 'right'
+  raggedright: 'left'
+  centering: 'center'
+
 ## Process all commands starting with \ followed by a letter a-z.
 ## This is not a valid escape sequence in Markdown, so can be safely supported
 ## in Markdown too.
@@ -160,6 +185,7 @@ latex2htmlCommandsAlpha = (tex, math) ->
   .replace /\\(BY|YEAR)\s*{([^{}]*)}/g, '<span style="border: thin solid; margin-left: 0.5em; padding: 0px 4px; font-variant:small-caps">$2</span>'
   .replace /\\protect\b\s*/g, ''
   .replace /\\par\b\s*/g, '<p>'
+  .replace /\\sout\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<s>$1</s>'
   .replace /\\emph\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<em>$1</em>'
   .replace /\\textit\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="font-style: italic">$1</span>'
   .replace /\\textup\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="font-style: normal">$1</span>'
@@ -209,18 +235,71 @@ latex2htmlCommandsAlpha = (tex, math) ->
     .replace /\\sf\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-family: sans-serif">$1</span>"""
     .replace /\\tt\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-family: monospace">$1</span>"""
     .replace /\\sc\b\s*((?:[^{}<>]|{[^{}]*})*)/g, """<span style="font: #{defaultFontFamily}; font-variant: small-caps">$1</span>"""
+    ## Alignment
+    .replace /\\(raggedleft|raggedright|centering)\b\s*((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)/g, (match, align, content) ->
+      """<div style="text-align:#{texAlign[align]};"><p>#{content}</p></div>"""
     break if old == tex
+  listStyles = []
+  listCounts = []
   tex = tex
   .replace /\\(uppercase|MakeTextUppercase)\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="text-transform: uppercase">$2</span>'
   .replace /\\(lowercase|MakeTextLowercase)\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="text-transform: lowercase">$2</span>'
   .replace /\\underline\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<u>$1</u>'
   .replace /\\textcolor\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="color: $1">$2</span>'
   .replace /\\colorbox\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<span style="background-color: $1">$2</span>'
-  .replace /\\begin\s*{enumerate}/g, '<ol>'
-  .replace /\\begin\s*{itemize}/g, '<ul>'
-  .replace /\\item\b\s*/g, '<li>'
-  .replace /\\end\s*{enumerate}/g, '</ol>'
-  .replace /\\end\s*{itemize}/g, '</ul>'
+  ## Nested list environments: process all together (with listStyles global)
+  ## to handle special \item formatting.
+  .replace ///((?:\s|<p>)*)(?:
+    \\begin\s*{(itemize)}
+   |\\begin\s*{enumerate}(?:\s*\[((?:[^\[\]]|{[^{}]*})*)\])?
+   |\\end\s*{(itemize|enumerate)}
+   |\\item\b\s*(?:\[([^\[\]]*)\]\s*)?
+  )///g, (match, space, beginItemize, enumArg, end, itemArg) ->
+    space.replace(/\n\s*\n|<p>/g, '\n') +  ## eat paragraphs
+    switch match[space.length + 1]
+      when 'b' ## \begin
+        listStyles.push enumArg
+        listCounts.push 0
+        if beginItemize
+          '<ul>'
+        else # beginEnumerate
+          '<ol>'
+      when 'e' ## \end
+        listStyles.pop()
+        listCounts.pop()
+        if end == 'itemize'
+          '</ul>'
+        else
+          '</ol>'
+      when 'i' ## \item
+        listCounts[listCounts.length-1]++
+        if listStyles[listStyles.length-1]?
+          count = listCounts[listCounts.length-1]
+          itemArg ?= listStyles[listStyles.length-1]
+          .replace /[AaIi1]|{[^{}]*}/g, (match) ->
+            switch match
+              when '1'
+                count
+              when 'a', 'A'
+                String.fromCharCode (match.charCodeAt() + count - 1)
+              when 'i'
+                (romanNumeral.convert count).toLowerCase()
+              when 'I'
+                romanNumeral.convert count
+              else ## {...}
+                match[1...-1]
+        if itemArg?
+          ## Data didn't support e.g. math: """<li data-itemlab="#{arg}">"""
+          """<li class="noitemlab"><span class="itemlab">#{itemArg}</span>"""
+        else
+          '<li>'
+  ## Because we define styles for first <p> child of <li>, we need to make
+  ## sure that, if an <li> has any <p> in it, then it also starts with one.
+  .replace /(<li\b[^<>]*>)([^]*?)<p\b[^<>]*>/gi, (match, li, inner) ->
+    unless inner.match /<li\b|<\/\s*[uo]l\b/i
+      li + '<p>' + match[li.length..]
+    else
+      match
   .replace /\\chapter\s*\*?\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<h1>$1</h1><p>'
   .replace /\\section\s*\*?\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<h2>$1</h2><p>'
   .replace /\\subsection\s*\*?\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/g, '<h3>$1</h3><p>'
@@ -253,29 +332,56 @@ latex2htmlCommandsAlpha = (tex, math) ->
       else
         value = "-#{value}"
       """<span style="margin-top: #{value}#{unit};">#{arg}</span>"""
-  .replace /\\begin\s*{(problem|question|idea|theorem|conjecture|lemma|corollary|fact|observation|proposition|claim|definition)}(\s*\[([^\]]*)\])?/g, (m, env, x, opt) -> "<blockquote><p><b>#{s.capitalize env}#{if opt then " (#{opt})" else ''}:</b> "
+  .replace /\\begin\s*{(problem|question|idea|theorem|conjecture|lemma|corollary|fact|observation|proposition|claim|definition)}(\s*\[([^\]]*)\])?/g, (m, env, x, opt) -> """<blockquote class="thm"><p><b>#{s.capitalize env}#{if opt then " (#{opt})" else ''}:</b> """
   .replace /\\end\s*{(problem|question|idea|theorem|conjecture|lemma|corollary|fact|observation|proposition|claim|definition)}/g, '</blockquote>'
   .replace /\\begin\s*{(quote)}/g, '<blockquote><p>'
   .replace /\\end\s*{(quote)}/g, '</blockquote>'
   .replace /\\begin\s*{(proof|pf)}(\s*\[([^\]]*)\])?/g, (m, env, x, opt) -> "<b>Proof#{if opt then " (#{opt})" else ''}:</b> "
   .replace /\\end\s*{(proof|pf)}/g, ' <span class="pull-right">&#8718;</span></p><p class="clearfix">'
-  .replace /\\begin\s*{tabular}\s*{([^{}]*)}([^]*)\\end\s*{tabular}/g, (m, cols, body) ->
-    '<table class="table">' +
+  .replace /\\begin\s*{center}([^]*?)\\end\s*{center}/g, (m, body) ->
+    '<div style="margin: 10pt auto; width: fit-content">' +
+    body + '</div>'
+  .replace /\\begin\s*{tabular}\s*{([^{}]*)}([^]*?)\\end\s*{tabular}/g, (m, cols, body) ->
+    cols = cols.replace /|/g, '' # not yet supported
+    skip = (0 for colnum in [0...cols.length])
+    '<table>' +
       (for row in body.split /(?:\\\\|\[DOUBLEBACKSLASH\])(?:\s*\\(?:hline|cline\s*{[^{}]*}))?/
          continue unless row.trim()
          "<tr>\n" +
-         (for col, x in row.split '&'
-            align =
-              switch cols[x]
+         (for col, colnum in row.split '&'
+            if skip[colnum]
+              skip[colnum] -= 1
+              continue
+            align = cols[colnum]
+            attrs = ''
+            style = ''
+            ## "If you want to use both \multirow and \multicolumn on the same
+            ## entry, you must put the \multirow inside the \multicolumn"
+            ## [http://ctan.mirrors.hoobly.com/macros/latex/contrib/multirow/multirow.pdf]
+            if match = /\\multicolumn\s*(\d+|{\s*(\d+)\s*})\s*(\w|{([^{}]*)})\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/.exec col
+              attrs += " colspan=\"#{match[2] ? match[1]}\""
+              align = match[4] ? match[3]
+              col = match[5]
+            ## In HTML, rowspan means that later rows shouldn't specify <td>s
+            ## for that column, while in LaTeX, they are still present.
+            if match = /\\multirow\s*(\d+|{\s*(\d+)\s*})\s*(\*|{([^{}]*)})\s*{((?:[^{}]|{(?:[^{}]|{[^{}]*})*})*)}/.exec col
+              rowspan = parseInt match[2] ? match[1]
+              skip[colnum] += rowspan - 1
+              attrs += " rowspan=\"#{rowspan}\""
+              style = 'vertical-align: middle; '
+              #width = match[4] ? match[3]
+              col = match[5]
+            attrs +=
+              switch align
                 when 'c'
-                  ' style="text-align: center"'
+                  " style=\"#{style}text-align: center\""
                 when 'l'
-                  ' style="text-align: left"'
+                  " style=\"#{style}text-align: left\""
                 when 'r'
-                  ' style="text-align: right"'
+                  " style=\"#{style}text-align: right\""
                 else
-                  ''
-            "<td#{align}>#{col}</td>\n"
+                  style
+            "<td#{attrs}>#{col}</td>\n"
          ).join('') +
          "</tr>\n"
       ).join('') +
@@ -423,7 +529,7 @@ postprocessCoauthorLinks = (text) ->
       ## (This would just be to get its title, so maybe not worth it.)
       msg = Messages.findOne id
       if msg?.title
-        html = """<a title="#{msg.title.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"" href=#{html[html.length-1]}"""
+        html = """<a title="#{escapeForQuotedHTML msg.title}" href=#{html[html.length-1]}"""
       html + urlFor('message',
         group: msg?.group or wildGroup
         message: id
@@ -460,19 +566,19 @@ postprocessCoauthorLinks = (text) ->
 
 postprocessLinks = (text) ->
   text.replace urlRe, (match, offset, string) ->
+    #console.log string, offset, inTag string, offset
     if inTag string, offset
       match
     else
       match.replace /\/+/g, (slash) ->
         "#{slash}&#8203;"  ## Add zero-width space after every slash group
 
-allUsers = ->
+allUsernames = ->
   users = Meteor.users.find {}, fields: username: 1
   .map (user) -> user.username
 
 atRePrefix = '[@\uff20]'
-@atRe = (users = allUsers()) ->
-  users = allUsers() unless users?
+@atRe = (users = allUsernames()) ->
   users = [users] unless _.isArray users
   ## Reverse-sort by length to ensure maximum-length match
   ## (to handle when one username is a prefix of another).
@@ -485,10 +591,13 @@ atRePrefix = '[@\uff20]'
 
 postprocessAtMentions = (text) ->
   return text unless ///#{atRePrefix}///.test text
-  users = allUsers()
+  users = allUsernames()
   return text unless 0 < users.length
-  text.replace (atRe users), (match, user) ->
-    "@#{linkToAuthor (routeGroup?() ? wildGroup), user}"
+  text.replace (atRe users), (match, user, offset, string) ->
+    unless inTag string, offset
+      "@#{linkToAuthor (routeGroup?() ? wildGroup), user}"
+    else # e.g. in <a title="..."> caused by postprocessCoauthorLinks
+      match
 
 preprocessKaTeX = (text) ->
   math = []
@@ -503,15 +612,34 @@ putMathBack = (tex, math) ->
   ## Restore math
   tex.replace /MATH(\d+)ENDMATH/g, (match, id) -> math[id].all
 
-postprocessKaTeX = (text, math) ->
+postprocessKaTeX = (text, math, initialBold) ->
   macros = {}  ## shared across multiple math expressions within same body
-  text.replace /MATH(\d+)ENDMATH([,.!?:;'"\-)\]}]*)/g, (match, id, punct) ->
+  if initialBold
+    weights = [boldWeight]
+  else
+    weights = [mediumWeight]
+  text.replace /MATH(\d+)ENDMATH([,.!?:;'"\-)\]}]*)|<span([^<>]*)>|<b\b|<strong\b|<\/\s*(b|strong|span)\s*>/g, (match, id, punct, spanArgs) ->
+    ## Detect math within bold mode
+    unless id?
+      if spanArgs?
+        spanArgs = /style\s*=\s*['"]font-weight:\s*(\d+)/i.exec spanArgs
+        if spanArgs?
+          weights.push parseInt spanArgs[1]
+      else if match == '<b' or match == '<strong'
+        weights.push boldWeight
+      else if match[...2] == '</'
+        weights.pop()
+      return match
+    ## MATH...ENDMATH
     block = math[id]
     content = block.content
     #.replace /&lt;/g, '<'
     #.replace /&gt;/g, '>'
     #.replace /’/g, "'"
     #.replace /‘/g, "`"  ## remove bad Marked automatic behavior
+    bold = (weights[weights.length-1] == boldWeight)
+    if bold
+      content = "\\boldsymbol{#{content}}"
     try
       out = katex.renderToString content,
         displayMode: block.display
@@ -520,14 +648,12 @@ postprocessKaTeX = (text, math) ->
     catch e
       throw e unless e instanceof katex.ParseError
       #console.warn "KaTeX failed to parse $#{content}$: #{e}"
-      title = e.toString()
-      .replace /&/g, '&amp;'
-      .replace /"/g, '&#34;'
-      latex = content
-      .replace /&/g, '&amp;'
-      .replace /</g, '&lt;'
-      .replace />/g, '&gt;'
+      title = escapeForQuotedHTML e.toString()
+      latex = escapeForHTML content
       out = """<span class="katex-error" title="#{title}">#{latex}</span>"""
+    ## Remove \boldsymbol{...} from TeX source, in particular for copy/paste
+    if bold
+      out = out.replace /(<annotation encoding="application\/x-tex">)\\boldsymbol{([^]*?)}(<\/annotation>)/i, '$1$2$3'
     out += punct
     if punct and not block.display
       '<span class="nobr">' + out + '</span>'
@@ -551,7 +677,7 @@ formatSearch = (isTitle, text) ->
     recurse parseSearch search
   text
 
-formatEither = (isTitle, format, text, leaveTeX = false) ->
+formatEither = (isTitle, format, text, leaveTeX = false, bold = false) ->
   return text unless text?
   text = formatSearch isTitle, text
 
@@ -566,6 +692,11 @@ formatEither = (isTitle, format, text, leaveTeX = false) ->
       text = formats[format] text, isTitle
     else
       console.warn "Unrecognized format '#{format}'"
+
+  ## Remove space after <li> to prevent shifting the next item right relative
+  ## to the item label.  Related to CSS rule for "li > p:first-child".
+  text = text.replace /(<li[^<>]*>)\s+/ig, '$1'
+
   ## Remove surrounding <P> block caused by Markdown and LaTeX formatters.
   if isTitle
     text = text
@@ -574,16 +705,16 @@ formatEither = (isTitle, format, text, leaveTeX = false) ->
   if leaveTeX
     text = putMathBack text, math
   else
-    text = postprocessKaTeX text, math
+    text = postprocessKaTeX text, math, bold
   text = linkify text  ## Extra support for links, unliked LaTeX
   text = postprocessCoauthorLinks text
   text = postprocessLinks text
   text = postprocessAtMentions text
   sanitize text
 
-formatEitherSafe = (isTitle, format, text, leaveTeX = false) ->
+formatEitherSafe = (isTitle, format, text, leaveTeX = false, bold = false) ->
   try
-    formatEither isTitle, format, text, leaveTeX
+    formatEither isTitle, format, text, leaveTeX, bold
   catch e
     console.error e.stack ? e.toString()
     if isTitle
@@ -597,11 +728,11 @@ formatEitherSafe = (isTitle, format, text, leaveTeX = false) ->
         <pre>#{_.escape text}</pre>
       """
 
-@formatBody = (format, body, leaveTeX = false) ->
-  formatEitherSafe false, format, body, leaveTeX
+@formatBody = (format, body, leaveTeX = false, bold = false) ->
+  formatEitherSafe false, format, body, leaveTeX, bold
 
-@formatTitle = (format, title, leaveTeX = false) ->
-  formatEitherSafe true, format, title, leaveTeX
+@formatTitle = (format, title, leaveTeX = false, bold = false) ->
+  formatEitherSafe true, format, title, leaveTeX, bold
 
 @formatBadFile = (fileId) ->
   """<i class="bad-file">&lt;unknown file with ID #{fileId}&gt;</i>"""
@@ -653,9 +784,9 @@ We therefore don't display any file that is still in the zero-length state.
   else
     title
 
-@formatTitleOrFilename = (msg, orUntitled = true, leaveTeX = false) ->
+@formatTitleOrFilename = (msg, orUntitled = true, leaveTeX = false, bold = false) ->
   if msg.format and msg.title and msg.title.trim().length > 0
-    formatTitle msg.format, msg.title, leaveTeX
+    formatTitle msg.format, msg.title, leaveTeX, bold
   else
     formatFilename msg, orUntitled
 
