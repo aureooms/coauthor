@@ -1,6 +1,6 @@
 template(name='since')
   if groupData
-    .panel.panel-primary
+    .panel.panel-primary.since
       .panel-heading.clearfix
         form.form-inline
           span.title.panel-title= group
@@ -8,11 +8,11 @@ template(name='since')
           | since
           input(type='text', size='10', value=since).form-control#sinceInput
           | = #{parseSince}
-          span.pull-right.badge= messageCount
+          span.push-down.pull-right.badge= messageCount
       .panel-body
         if valid
           each messages
-            +readMessageHeader
+            +submessageHeader
         else
           .alert.alert-danger(role="alert") Invalid &ldquo;since&rdquo; query.  Examples: &ldquo;5 days&rdquo; or &ldquo;2016-01-01 15:30&rdquo; or &ldquo;0:00&rdquo;.
       if valid

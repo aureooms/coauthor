@@ -37,11 +37,14 @@ in other fields too.
   * [Github-style Markdown](https://guides.github.com/features/mastering-markdown/)
     (default), e.g., `*italic*`, `**bold**`, `~~strikethrough~~`,
     `# Heading`, `## Subheading`, \`code\`, `> Block quote`,
-    <code>\`\`\`multiple lines of code\`\`\`</code>,
+    <code>\`\`\`multiple lines of code\`\`\`</code>
+    (including [language-based highlighting](https://highlightjs.org/)
+     if you start with <code>\`\`\`language</code>),
     links via `[text](url)`, images via `![caption](url)`,
-    lists via `*` or `1.`, tables, etc.
+    lists via `*` or `1.`,
+    [tables](http://www.tablesgenerator.com/markdown_tables), etc.
     Also supports all LaTeX commands listed below that start with a letter
-    (notably, not accents) and math mode.
+    (notably, not accents) and math mode, and all HTML commands listed below.
   * LaTeX, limited.  Beyond extensive math mode support (see below),
     the following features are supported in text mode; feel free to ask
     for more.  `%...`, `\def\macro{...}`, `\let\macro=\mac`, `\protect`,
@@ -72,6 +75,7 @@ in other fields too.
     `equation`, `eqnarray`, `align`,
     `problem`, `question`, `idea`, `theorem`, `conjecture`, `lemma`,
     `corollary`, `fact`, `observation`, `proposition`, `claim`, `proof`.
+    Also supports all HTML commands listed below.
   * HTML, sanitized.  The following tags are allowed; feel free to ask for
     more.  `<h1>`, `<h2>`, `<h3>`, `<h4>`, `<h5>`, `<h6>`,
     `<blockquote>`, `<p>`, `<div>`, `<span>`,
@@ -79,8 +83,9 @@ in other fields too.
     `<strong>`, `<i>`, `<em>`, `<u>`, `<s>`, `<strike>`, `<del>`, `<code>`,
     `<hr>`, `<br>`, `<table>`, `<thead>`, `<caption>`,
     `<tbody>`, `<tr>`, `<th>`, `<td>`, `<pre>`,
+    `<details><summary>Title</summary> Folded-away text</details>`,
     `<img src/alt/width/height>`, `<video controls>`, `<source src>`;
-    attributes `title`, `style`, `class`, `aria-*`.
+    attributes `title`, `style`, `class` (limited), `aria-*`.
     Also supports LaTeX math mode.
 
 * Light and dark themes available under Settings.
@@ -130,13 +135,15 @@ in other fields too.
   folded for all users (e.g., when a discussion/question resolves and is
   no longer important, but you want to preserve it for future reference).
 
-* **Dragging** messages to change the parentage/hierarchy, or move their
-  position within their parent.  You must drag *onto* the table of contents
-  on the right; you can drag *from* the table of contents, or from the
-  right-arrow of a message in the main view.
+* **Move** (reparent) messages by selecting Action / Move, or by dragging
+  messages around in the table of contents on the right.
+  (You can also start a drag in the main view from the right-arrow
+  of a message, but the drag must end at the table of contents.)
   Dragging directly onto a message makes the dragged message the last child,
   while dragging onto the slot before a message makes the dragged message the
-  immediately preceding sibling.  Dialog confirms move.
+  immediately preceding sibling.  Dialog confirms move, and allows you to type
+  another message title/creator/ID, or the name of a group if you want to
+  make the message into a new thread's root message.
 
 * **Tags**: attach an arbitrary set of strings to a message.  Find other
   messages with the same tag by clicking on a tag.

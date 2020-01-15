@@ -394,6 +394,10 @@ latex2htmlCommandsAlpha = (tex, math) ->
   .replace /\\textasciitilde\b\s*/g, '&Tilde;'  ## Avoid ~ -> \nbsp
   .replace /\\textasciicircum\b\s*/g, '&Hat;'
   .replace /\\textbackslash\b\s*/g, '&backslash;'  ## Avoid \ processing
+  ## The following tweaks are not LaTeX actually, but useful in all modes,
+  ## so we do them here.
+  .replace /\b[0-9]+(x[0-9]+)+\b/ig, (match) ->
+     match.replace /x/ig, '\u00a0×\u00a0'
 
 ## "Light" LaTeX support, using only commands that start with a letter a-z,
 ## so are safe to process in Markdown.  No accent support.
@@ -477,6 +481,14 @@ latex2html = (tex) ->
       text = markdownInline text
     else
       text = markdown text
+    ## Wrap markdown-it-task-checkbox checkboxes in <span class="itemlab">
+    text = text.replace /(<li\b[^<>]*>\s*)(<input\b[^<>]*>)\s*/ig,
+      (match, li, input) ->
+        if /type\s*=\s*"checkbox"/.test input
+          "#{li}<span class=\"itemlab\">#{input}</span>"
+        else
+          match
+    .replace /(<label\b[^<>]*>)\s*/ig, '$1'
     [text, math]
   latex: (text, title) ->
     latex2html text
@@ -494,10 +506,12 @@ latex2html = (tex) ->
     message: '(.*)'
     0: '*'
     1: '*'
-  }$").exec url
+  .replace /\./g, '[^/#]'
+  }(#.*)?$").exec url
   if match?
     group: match[1]
     message: match[2]
+    hash: match[3] ? ''
 
 @parseCoauthorAuthorUrl = (url) ->
   match = new RegExp("^#{urlFor 'author',
@@ -696,6 +710,13 @@ formatEither = (isTitle, format, text, leaveTeX = false, bold = false) ->
   ## Remove space after <li> to prevent shifting the next item right relative
   ## to the item label.  Related to CSS rule for "li > p:first-child".
   text = text.replace /(<li[^<>]*>)\s+/ig, '$1'
+
+  ## Add missing <summary>s to <details> tags, for better formatting.
+  text = text.replace /(<details[^<>]*>)([^]*?<\/details>)/ig,
+    (match, head, body) ->
+      unless /<summary/i.test body
+        body = '<summary>Details</summary>' + body
+      head + body
 
   ## Remove surrounding <P> block caused by Markdown and LaTeX formatters.
   if isTitle

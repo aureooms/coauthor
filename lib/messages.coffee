@@ -1,6 +1,12 @@
 import { defaultFormat } from './settings.coffee'
 import { ShareJS } from 'meteor/edemaine:sharejs'
 
+idleUpdate = 1000      ## one second of idle time before edits update message
+export idleStop = 60*60*1000  ## one hour of idle time before auto stop editing
+
+## Thanks to https://github.com/aldeed/meteor-simple-schema/blob/4ead24bcc92e9963dd994c07d275eac144733c3e/simple-schema.js#L548-L551
+@idRegex = "[23456789ABCDEFGHJKLMNPQRSTWXYZabcdefghijkmnopqrstuvwxyz]{17}"
+
 @untitledMessage = '(untitled)'
 
 @titleOrUntitled = (msg) ->
@@ -47,6 +53,11 @@ if Meteor.isServer
   Messages._ensureIndex [
     ['children', 1]
   ]
+  ## Diffs are accessed by message ID, and then sorted by updated date.
+  MessagesDiff._ensureIndex [
+    ['id', 1]
+    ['updated', 1]
+  ]
 
 @rootMessages = (group) ->
   query =
@@ -67,11 +78,15 @@ if Meteor.isServer
   descendants
 
 @ancestorMessages = (message, self = false) ->
+  start = message._id ? message
   if self and message?
     yield findMessage message
   loop
     message = findMessageParent message
     break unless message?
+    if message._id == start
+      throw new Meteor.Error 'ancestorMessages.cycle',
+        "There is already a cycle in ancestors of #{start}!"
     yield message
 
 ## Recompute this every time to make sure no one modifies it.
@@ -402,16 +417,6 @@ if Meteor.isServer
 #    root = root._id if root._id?
 #    MessagesSummary.findOne root
 
-if Meteor.isServer
-  ## Remove all editors on server start, so that we can restart listeners.
-  Messages.find().forEach (message) ->
-    if message.editing?.length
-      Messages.update message._id,
-        $unset: editing: ''
-
-  onExit ->
-    console.log 'EXITING'
-
 @canSee = (message, client = Meteor.isClient, user = Meteor.user(), group) ->
   ## Visibility of a message is implied by its existence in the Meteor.publish
   ## above, so we don't need to check this in the client.  But this function
@@ -486,12 +491,25 @@ if Meteor.isServer
       false
     else
       root = findMessageRoot message
-      root.threadPrivacy? and 'public' in root.threadPrivacy and 'private' in root.threadPrivacy
+      root?.threadPrivacy? and 'public' in root.threadPrivacy and 'private' in root.threadPrivacy
 
 @canAdmin = (group, message = null) ->
   messageRoleCheck group, message, 'admin'
 
-idle = 1000   ## one second
+@canMaybeParent = canEdit  # could this message may be reparented?
+@canParent = (child, parent, group) ->  # is this parent operation allowed?
+  child = findMessage child
+  parent = findMessage parent
+  group ?= parent.group
+  ## Need target group, either from parent or argument (to make root message)
+  return false unless group?
+  ## Moving a message across groups will cause users in current group to lose
+  ## access to the message; require superuser access in that group.
+  if child.group != group
+    return false unless canSuper child.group
+  ## Need to be able to edit the child message and be able to post within
+  ## the target parent.
+  canEdit(child) and canPost group, parent
 
 @message2group = (message) ->
   findMessage(message)?.group
@@ -524,6 +542,22 @@ idle = 1000   ## one second
     Messages.findOne message.root
   else
     message
+
+@findLastDiff = (id) ->
+  MessagesDiff.find
+    id: id
+  ,
+    sort: [['updated', 'desc']]
+    limit: 1
+  .fetch()?[0]
+
+@finishLastDiff = (id, editing) ->
+  lastDiff = findLastDiff id
+  return unless lastDiff?
+  relevant = (editor for editor in editing when editor in (lastDiff.updators ? []))
+  if relevant.length
+    MessagesDiff.update lastDiff._id,
+      $addToSet: finished: $each: relevant
 
 @messageEmpty = (message) ->
   message = findMessage message
@@ -637,6 +671,7 @@ export messageContentFields = [
 
 export messageExtraFields = [
   'editing'
+  #'finished'
   'submessageCount'
   'submessageLastUpdated'
   #'children'
@@ -683,6 +718,11 @@ _messageUpdate = (id, message, authors = null, old = null) ->
     minimized: Match.Optional Boolean
     rotate: Match.Optional Match.Where (r) ->
       typeof r == "number" and -180 < r <= 180
+    finished: Match.Optional Boolean
+  ## `finished` is a special indicator to mark the diff as finished,
+  ## when making edits from outside editing mode.
+  finished = message.finished
+  delete message.finished
 
   ## Don't update if there aren't any actual differences.
   difference = false
@@ -703,6 +743,7 @@ _messageUpdate = (id, message, authors = null, old = null) ->
   Messages.update id,
     $set: message
   diff.id = id
+  diff.finished = authors if finished
   diffid = MessagesDiff.insert diff
   diff._id = diffid
   #_submessagesChanged old.root ? id
@@ -754,21 +795,30 @@ _messageParent = (child, parent, position = null, oldParent = true, importing = 
     group = pmsg.group
     root = pmsg.root ? parent
   else
-    group = cmsg.group  ## xxx can't reparent into root message of other group
+    group = position ? cmsg.group
+    position = null  ## henceforth, position should be an integer or null
+    unless findGroup group
+      throw new Meteor.Error 'messageParent.badGroup',
+        "Attempt to reparent #{child} into unknown group #{group}"
     root = null
 
-  unless canEdit(child) and canPost group, parent
+  #unless canEdit(child) and canPost group, parent
+  unless canParent child, parent, group
     throw new Meteor.Error 'messageParent.unauthorized',
       "Insufficient privileges to reparent message #{child} into #{parent}"
 
   ## Check before creating a cycle in the parent pointers.
   ## This can happen only if we are making the message nonroot (parent
-  ## nonnull) and the child has children of its own.
-  if parent? and cmsg.children?.length
-    for ancestor from ancestorMessages pmsg, true
-      if ancestor._id == child
-        throw new Meteor.Error 'messageParent.cycle',
-          "Attempt to make #{child} its own ancestor (via #{parent})"
+  ## nonnull), and either the child has children of its own or parent is child.
+  if parent?
+    if parent == child
+      throw new Meteor.Error 'messageParent.cycle',
+        "Attempt to make #{child} its own parent"
+    if cmsg.children?.length # optimization for new message
+      for ancestor from ancestorMessages pmsg, false # already checked parent
+        if ancestor._id == child
+          throw new Meteor.Error 'messageParent.cycle',
+            "Attempt to make #{child} its own ancestor (via #{parent})"
 
   oldPosition = null
   oldSiblingsBefore = null
@@ -788,27 +838,28 @@ _messageParent = (child, parent, position = null, oldParent = true, importing = 
         $pull: children: child
     else
       oldParent = null
-  return if parent == oldParent == null  ## no-op, root case
+  if parent == oldParent == null and group == cmsg.group
+    return  ## no-op, root case
   if parent?
     _messageAddChild child, parent, position
+  update = msgUpdate = {}
   if root != cmsg.root
-    update = root: root
-    if group != cmsg.group
-      update.group = group
-      ## First MessagesDiff has the initial group; add Diff if it changes.
-      ## (Unclear whether we should track group at all, though.)
-      now = new Date
-      username = Meteor.user().username
-      MessagesDiff.insert
-        id: cmsg._id
-        group: cmsg.group
-        updated: now
-        updators: [username]
-      Messages.update child,
-        $set: _.extend {"authors.#{escapeUser username}": now}, update
-    else
-      Messages.update child,
-        $set: update
+    update.root = root
+  if group != cmsg.group
+    update.group = group
+    ## First MessagesDiff has the initial group; add Diff if it changes.
+    ## (Unclear whether we should track group at all, though.)
+    now = new Date
+    username = Meteor.user().username
+    MessagesDiff.insert
+      id: cmsg._id
+      group: cmsg.group
+      updated: now
+      updators: [username]
+    msgUpdate = _.extend {"authors.#{escapeUser username}": now}, update
+  unless _.isEmpty update  # update root and/or group
+    Messages.update child,
+      $set: msgUpdate
     EmojiMessages.update
       message: child
     ,
@@ -869,6 +920,19 @@ _messageParent = (child, parent, position = null, oldParent = true, importing = 
 
 if Meteor.isServer
   editorTimers = {}
+  stopTimers = {}
+
+  ## Remove all editors on server start, so that we can restart listeners.
+  ## Update finished field accordingly, but don't prevent finished bootstrap.
+  needBootstrap = not MessagesDiff.findOne finished: $exists: true
+  Messages.find().forEach (message) ->
+    if message.editing?.length
+      finishLastDiff message._id, message.editing unless needBootstrap
+      Messages.update message._id,
+        $unset: editing: ''
+
+  onExit ->
+    console.log 'EXITING'
 
   ## If we're using a persistent store for sharejs, we need to cleanup
   ## leftover documents from last time.  This should only be for local
@@ -889,11 +953,24 @@ if Meteor.isServer
       , editors, msg
 
   delayedEditor2messageUpdate = (id) ->
+    updateStopTimer id
     Meteor.clearTimeout editorTimers[id]
     editors = findMessage(id).editing
     editorTimers[id] = Meteor.setTimeout ->
       editor2messageUpdate id, editors
-    , idle
+    , idleUpdate
+
+  updateStopTimer = (id) ->
+    Meteor.clearTimeout stopTimers[id]
+    stopTimers[id] = Meteor.setTimeout ->
+      ## This code is like an extreme form of `messageEditStop` below:
+      editing = Messages.findOne(id).editing ? []
+      editor2messageUpdate id, editing
+      Messages.update id,
+        $unset: editing: ''
+      finishLastDiff id, editing
+      ShareJS.model.delete id
+    , idleStop
 
 Meteor.methods
   messageUpdate: (id, message) -> _messageUpdate id, message
@@ -917,6 +994,11 @@ Meteor.methods
       minimized: Match.Optional Boolean
       rotate: Match.Optional Match.Where (r) ->
         typeof r == "number" and -180 < r <= 180
+      finished: Match.Optional Boolean
+    ## `finished` is a special indicator to mark the diff as finished,
+    ## when making edits from outside editing mode.
+    finished = message.finished
+    delete message.finished
     user = Meteor.user()
     unless canPost group, parent, user
       throw new Meteor.Error 'messageNew.unauthorized',
@@ -981,6 +1063,7 @@ Meteor.methods
           $max: submessageLastUpdate: message.updated
     ## Store diff
     diff.id = id
+    diff.finished = diff.updators if finished
     diffid = MessagesDiff.insert diff
     diff._id = diffid
     notifyMessageUpdate message, null if Meteor.isServer  ## null means created
@@ -994,11 +1077,20 @@ Meteor.methods
     #message
 
   messageParent: (child, parent, position = null) ->
-    ## Notably, disabling oldParent search and importing options are not
-    ## allowed from client, only internal to server.
+    ## `child` is the message to reparent.
+    ## `parent` is the new parent, or null means make `child` a root message.
+    ## `position` normally specifies the integer index to place in parent's
+    ## children list.  When `parent` is null, though, it can specify a group
+    ## to make `child` the root of (when you're superuser).
+    ##
+    ## Notably, disabling `oldParent` setting and `importing` options of
+    ## `_messageParent` are not allowed from client, only internal to server.
     check Meteor.userId(), String  ## should be done by 'canEdit'
     check parent, Match.OneOf String, null
-    check position, Match.Maybe Number
+    if parent?
+      check position, Match.Maybe Number
+    else
+      check position, Match.Maybe String
     _messageParent child, parent, position
 
   messageEditStart: (id) ->
@@ -1012,27 +1104,30 @@ Meteor.methods
       unless old.editing?.length
         ShareJS.model.delete id
         ShareJS.initializeDoc id, old.body ? ''
-        timer = null
-        listener = Meteor.bindEnvironment (opData) ->
+        ShareJS.model.listen id, Meteor.bindEnvironment (opData) ->
           delayedEditor2messageUpdate id
-        ShareJS.model.listen id, listener
+        updateStopTimer id
       ## We used to do the following update in client too, to do
       ## speculatively, but it seems problematic for now.
       Messages.update id,
         $addToSet: editing: Meteor.user().username
 
   messageEditStop: (id) ->
+    ## When updating this method, you might also want to update the "extreme"
+    ## form in `updateStopTimer` above.
     check Meteor.userId(), String
     if Meteor.isServer
       ## We used to do the following update in client too, to do
       ## speculatively, but it seems problematic for now.
       Messages.update id,
         $pull: editing: Meteor.user().username
-      unless Messages.findOne(id).editing?.length
+      unless Messages.findOne(id).editing?.length  ## removed last editor
+        Meteor.clearTimeout stopTimers[id]
         editor2messageUpdate id, [Meteor.user().username]
         ShareJS.model.delete id
-    ## xxx should add to last MessagesDiff (possibly just made) that
-    ## Meteor.user().username just committed this version.
+      ## If this user was involved in the last edit to this mesage,
+      ## mark it as "finished" version for the user.
+      finishLastDiff id, [Meteor.user().username]
 
   messageImport: (group, parent, message, diffs) ->
     #check Meteor.userId(), String  ## should be done by 'canImport'
@@ -1091,6 +1186,7 @@ Meteor.methods
     for diff in diffs
       for author in diff.updators
         message.authors[author] = diff.updated
+    diff?.finished = diff.updators  ## last diff gets "finished" flag
     #if parent?
     #  pmsg = Messages.findOne parent
     #  message.root = pmsg.root ? parent

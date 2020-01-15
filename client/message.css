@@ -2,28 +2,51 @@
 .absolute { position: absolute; }
 
 .fa-paperclip { vertical-align: middle; }
-.title { font-weight: bold; vertical-align: middle; }
-input.title { width: 100%; }
+.title { font-weight: bold; }
+input.title { width: calc(100% + 5px); margin: 0px -5px 0px 0px; }
 .author { font-style: italic; }
-.message-body { text-align: justify; position: relative; overflow: auto; }
+.message-body { text-align: justify; }
+.message-body, .message-title { position: relative; overflow: auto; overflow-wrap: break-word; contain: layout paint style; }
   /* We set `position: relative` so any position: absolute's within have
    * this as the containing block. We set `overflow: auto` to prevent hacks
    * that render outside the rectangle of this message; also, it handles
    * too-wide formulas in a nicer way.
    */
+.katex .katex-mathml { left: 0; }
+  /* avoid pushing into right margin, given `position: absolute` layout */
+.katex .vlist-t2 { margin-right: -0.1px; }
+.katex .vlist-s { width: 0.1px; min-width: 0.1px; }
+  /* avoid vlists from pushing into right margin and causing scroll bars;
+   * KaTeX uses 2px for these two numbers instead
+   */
 .message-footer { width: 100%; padding: 0ex 1em; }
 .panel-body { padding-bottom: 0px; } /* always have a footer right below */
 .message-deleted > .message-body, .message-unpublished > .message-body { opacity: 0.6; }
-/*.message-right-buttons { margin: -5px -10px -5px 5px; }*/ /* cf. panel-heading's padding of 10px 15px */
-.message > .panel-heading { padding: 5px 5px 5px 10px; }
-.root > .panel-heading { padding: 5px 5px 5px 10px; border-bottom: 0px; }
-.messageTitle { display: inline-block; padding: 5px 5px 5px 0px; }
-.panel-secondbody > .messageTitle { display: inline; color: gray; }
-.panel-secondbody > .messageTitle > .panel-title { font-weight: normal; font-size: small; }
+/* .push-down (e.g. .message-left-buttons) push the title down to compensate
+ * for the missing 5px top-padding of .panel-heading (needed to get the
+ * .message-right-buttons to be higher than the title, without using negative
+ * spacing, which would mess up multiline titles).
+ */
+.push-down { margin-top: 5px; vertical-align: -5px; }
+.panel-heading form .push-down, .search > .panel-heading > .pull-right.push-down { margin-top: 8px; }
+.message-right-buttons, .group-right-buttons { margin: 0px -5px -5px 0px; } /* cf. panel-heading's padding of 10px */
+.panel-heading { padding: 5px 10px 10px 10px; } /* normally 10px 15px */
+.panel-heading.compact { padding: 0px 5px 5px 10px; }
+/* Fuse together root panel heading with following panel */
+.root, .root > .panel-heading { border-bottom: 0px; border-bottom-left-radius: 0px; border-bottom-right-radius: 0px; }
+.root + .panel, .root + .panel > .panel-heading { border-top: 0px; border-top-left-radius: 0px; border-top-right-radius: 0px;}
+.panel-secondbody > .message-title { display: inline; color: gray; }
+.panel-secondbody > .message-title > .panel-title { font-weight: normal; font-size: small; }
 .linkToTop { margin-top: -4px; }
+.message-title .label { vertical-align: 2px; } /* shift up to center */
+.message-subtitle { margin-top: 5px; }
+.upper-strut { display: inline-block; height: 20px; vertical-align: 0px; }
+.lower-strut { display: inline-block; vertical-align: -10px; }
 .messageTags > a:first-child, .messageLabels > span:first-child { margin-left: 0.5em; }
-input.title ~ .message-right-buttons { margin: 0px; }
-.message-reply-buttons { margin: 8px 0px 10px 0px; }
+.btn.label { float: none; height: 20px; } /* +Tag manual height adjustment */
+/* input.title ~ .message-right-buttons { margin: 0px; } */
+.message-response-buttons { margin: 8px 0px 10px 0px; }
+.message-reply-buttons { margin-left: 4px; }
 .fileDescription { padding: 0.5ex 0.5em; border-bottom: 1px solid #337ab7;
   display: flex; flex-direction: row;
   justify-content: space-between; align-items: center; }
@@ -58,6 +81,8 @@ input.title ~ .message-right-buttons { margin: 0px; }
  */
 .message-body li > p:first-child, .message-body li.noitemlab > p:nth-child(2) {
   display: inline-block; width: 100%; vertical-align: top; }
+/* markdown-it-task-checkbox */
+.message-body input[type="checkbox"] { margin-top: 0; margin-right: 2px; vertical-align: -2px; }
 
 /* Emoji */
 .emoji-plus { font-size: 0.7em; margin-top: -2px; vertical-align: middle; }
@@ -105,6 +130,7 @@ input.title ~ .message-right-buttons { margin: 0px; }
 .dropdown-menu.actionMenu > li > a:hover { min-width: 100px; background: white; }
 
 img, video { max-width: 100%; max-height: 100vh; }
+img { image-orientation: none; } /* we do manual EXIF rotation */
 .pdfBox { width: 100%; }
 .pdf > svg { width: 100%; height: auto; }
 .pdf > canvas { position: absolute; }
@@ -139,8 +165,10 @@ nav.contents { overflow-y: scroll; padding-bottom: 5px; }
 code.raw, pre { white-space: pre-wrap; }
 /* match <pre>, overriding Bootstrap code defaults */
 code { font-size: 100%; }
-code { color: #333; background-color: #f5f5f5; }
-.dark code { color: #eee; background-color: #222; }
+code { color: inherit; background-color: rgba(200,200,200,0.3); }
+.dark code { background-color: rgba(62,62,62,0.5); }
+pre code { background-color: inherit !important; }
+
 s .katex .base, del .katex .base { position: relative; } /* already in KaTeX */
 s .katex .base:after, del .katex .base:after { content: "";
   position: absolute; left: 0; width: 100%; top: 50%; display: block;
@@ -155,13 +183,24 @@ s a, del a { text-decoration-color: #c7254e; }
   background-image: linear-gradient(rgba(0,0,0,0), red, rgba(0,0,0,0)); }
 .onMessageDrop.dragover { background-image: linear-gradient(rgba(0,0,0,0), red, rgba(0,0,0,0)); }
 
-.messageParentConfirm .modal-content { max-height: 90vh; }
+.messageParentDialog .modal-body > .row:first-child { margin-bottom: 1.5ex; }
+.messageParentDialog .modal-body > .row:first-child > .col-xs-6:first-child { padding-top: 0.75ex; }
+.messageParentDialog .modal-body > .row:first-child > .col-xs-6:last-child { padding-right: 30px; }
+.messageParentDialog .modal-content { max-height: 90vh; }
 /* Workaround for https://bugs.chromium.org/p/chromium/issues/detail?id=958802
  * (in addition to removing .flexColumn from .modal-content) */
-.messageParentConfirm .modal-body { max-height: calc(90vh - 159px); } /* 159px is the measured height of header and footer */
+.messageParentDialog .modal-body { max-height: calc(90vh - 159px); } /* 159px is the measured height of header and footer */
+.messageParentDialog .tt-menu .id { font-size: x-small; }
+.messageParentDialog .tt-menu .author { font-size: medium; }
+.messageParentDialog .panel { border-bottom: 0; }
+.messageParentDialog .modal-footer { text-align: left; }
+.messageParentDialog .fa-lightbulb { font-size: x-large; margin-right: 0.5em; }
 .flexColumn { display: flex; flex-direction: column; }
 .flexRow { display: flex; flex-direction: row; }
+.flexGrow { flex-grow: 1; }
 .flexShrink { min-height: 50px; } /* allow equal-size shrinking height down to 50px */
+.flexNoShrink { flex-shrink: 0; }
+.flexCenter { align-items: center; }
 .scrollbars { overflow: auto; float: none; max-height: 100%; }
 .parentArrow { text-align: center; }
 .parentArrow div { vertical-align: top; display: inline-block; }
@@ -203,8 +242,61 @@ em em em em { font-style: normal }
 em em em em em { font-style: italic }
 em em em em em em { font-style: normal }
 
+/* Treat <details><summary>...</summary>...</details> roughly like
+ * <div class="panel panel-default"><div class="panel-heading
+ * compact">...</div>...</div>
+ */
+details {
+  padding: 0 10px 10px 10px;
+  /* From .panel */
+  margin-bottom: 20px; border: 1px solid transparent; border-radius: 4px;
+  box-shadow: 0 1px 1px rgba(0,0,0,.05);
+  /* From .panel-default */
+  border-color: #ddd;
+}
+.dark details { border-color: #222; }
+summary {
+  /* From .panel-heading */
+  border-bottom: 1px solid transparent;
+  border-top-left-radius: 3px; border-top-right-radius: 3px;
+  /* From .panel-heading.compact */
+  padding: 5px;
+  /* From .panel-default > .panel-heading */
+  border-color: #ddd; background-color: #f5f5f5; color: #333;
+}
+.dark summary { border-color: #222; background-color: #222; color: #eee; }
+details > summary {
+  list-style: none;
+  touch-action: manipulation; cursor: pointer;
+  margin: 0 -10px;
+}
+details:not([open]) > summary { margin-bottom: -10px }
+details[open] > summary { margin-bottom: 10px }
+details > summary::-webkit-details-marker { display: none; } /* Chrome */
+details > summary::before {
+  margin-right: 0.5em; /* like .space */
+  /* From .fas */
+  font-weight: 900; font-family: "Font Awesome 5 Free";
+  /* Tweaked from .btn-group-xs > .btn */
+  padding: 0px 3px; font-size: 12px; border-radius: 3px;
+  /* From .btn-default */
+  color: #333; background-color: #fff; border: 1px solid #ccc;
+  /* From .btn */
+  display: inline-block; margin-bottom: 0; text-align: center;
+  white-space: nowrap; vertical-align: middle; background-image: none;
+}
+.dark details > summary::before { color: #eee; background-color: #4d4d4d; border-color: #404040; }
+details > summary:hover::before, details > summary:active::before, details > summary:focus::before { background-color: #e6e6e6; border-color: #adadad; }
+.dark details > summary:hover::before, .dark details > summary:active::before, .dark details > summary:focus::before { background-color: #333; border-color: #212121; }
+details > summary:active:hover::before, details > summary:active:focus::before { background-color: #d4d4d4; border-color: #8c8c8c; }
+.dark details > summary:active:hover::before, .dark details > summary:active:focus::before { background-color: #212121; border-color: #000; }
+details > summary:focus::before { outline: 5px auto -webkit-focus-ring-color; outline-offset: -2px }
+details:focus, summary:focus { outline: none; }
+details > summary::before { content: "\f067"; }       /* From .fa-plus */
+details[open] > summary::before { content: "\f068"; } /* From .fa-minus */
+
 /* Author search highlighting */
 .highlight { background: yellow; color: black; }
 
-/* Search results */
-.panel-heading .pull-right.badge { margin-top: 2px; }
+/* Search results: 5px to match title + 2px to center vertically */
+.panel-heading .pull-right.badge { padding-top: 2px; }

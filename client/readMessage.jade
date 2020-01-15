@@ -6,22 +6,23 @@ template(name='readMessageHeader')
 
 template(name='readMessage')
   .panel.message(class=messagePanelClass, data-message=_id, id=_id)
-    .panel-heading.clearfix
-      .message-left-buttons.btn-group.btn-group-xs
-        button.btn.btn-info.foldButton(aria-label="Fold")
-          if folded
-            span.fas.fa-plus(aria-hidden="true")
-          else
-            span.fas.fa-minus(aria-hidden="true")
-        a.btn.btn-info.focusButton(aria-label="Focus", href="{{pathFor 'message' group=group message=_id}}")
-          span.fas.fa-sign-in-alt(aria-hidden="true")
-      span.space
-      span.title.panel-title.tex2jax !{formatTitleBold}
-      span.space
-      +messageTags
-      +messageLabels
+    .panel-heading.compact.clearfix
+      span.message-title
+        span.message-left-buttons.push-down.btn-group.btn-group-xs
+          button.btn.btn-info.foldButton(aria-label="Fold")
+            if folded
+              span.fas.fa-plus(aria-hidden="true")
+            else
+              span.fas.fa-minus(aria-hidden="true")
+          a.btn.btn-info.focusButton(aria-label="Focus", href="{{pathFor 'message' group=group message=_id}}")
+            span.fas.fa-sign-in-alt(aria-hidden="true")
+        span.space
+        span.title.panel-title.tex2jax !{formatTitleBold}
+        span.space
+        +messageTags
+        +messageLabels
       unless root
-        span.pull-right.badge(data-toggle="tooltip", title="Number of submessages within thread")= submessageCount
+        span.push-down.pull-right.badge(data-toggle="tooltip", title="Number of submessages within thread")= submessageCount
     unless folded
       .panel-body
         .message-body.tex2jax !{formatBody}
@@ -30,7 +31,7 @@ template(name='readMessage')
             with pdf
               +messagePDF
           p.message-file !{formatFile}
-      .message-footer.message-reply-buttons.clearfix
+      .message-footer.message-response-buttons.clearfix
         +emojiButtons
         +messageAuthor
       .children

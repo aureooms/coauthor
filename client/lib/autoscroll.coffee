@@ -2,10 +2,14 @@
 ## half a second, or top of page if we haven't been there before.
 ## Inspiration from https://github.com/iron-meteor/iron-router/issues/96 and
 ## https://github.com/sunstorymvp/meteor-iron-router-autoscroll
+##
+## Also support instantly going to certain paths (handled by WebApp)
+## as specified by internalPath.
 
 lastURL = null
 pastTops = {}
 transitioning = false
+internalPath = /^\/(gridfs|file)\//
 
 saveTops = _.debounce ->
   sessionStorage?.setItem? 'pastTops', JSON.stringify pastTops
@@ -18,7 +22,13 @@ $(window).scroll ->
   #console.log lastURL, $(window).scrollTop()
   saveTops()
 
-$(window).click (e) ->
+## Match event handler spec from https://github.com/iron-meteor/iron-location/blob/c3ad6663c37d3a94f0929c78f3c3fef8adf84dc9/lib/location.js#L242
+## so that we can override that handler via stopImmediatePropagation if needed.
+$(document).on 'click', 'a[href]', (e) ->
+  ## Only override left clicks
+  return unless e.button == 0
+  ## Only override vanilla clicks. Inspired by https://github.com/iron-meteor/iron-location/blob/c3ad6663c37d3a94f0929c78f3c3fef8adf84dc9/lib/location.js#L130
+  return if e.metaKey or e.ctrlKey or e.shiftKey
   ## If we click on a link with a hash mark in it, forget and therefore
   ## don't scroll to remembered position.
   if e.target?.href?.endsWith? '#'
@@ -32,6 +42,12 @@ $(window).click (e) ->
     if e.target.hostname == window.location.hostname and
        e.target.pathname == window.location.pathname
       scrollToMessage e.target.hash
+  ## Instantly go to internal paths, bypassing Iron Router
+  if e.target?.hostname == window.location.hostname and
+     internalPath.test e.target?.pathname
+    e.preventDefault()
+    e.stopImmediatePropagation?()
+    window.location = e.target.href
 
 Router.onBeforeAction ->
   transitioning = true
@@ -49,11 +65,15 @@ Router.onAfterAction ->
     lastURL = url
     top = pastTops[url] or 0  ## prevent from changing while page loads
     scroll = ->
-      $('html, body').animate
-        scrollTop: top
-      , 200
-    Tracker.autorun (computation) ->
-      if Router.current().ready()
-        scroll()
-        computation.stop()
-  , 100
+      $('html, body').scrollTop top
+      #$('html, body').animate
+      #  scrollTop: top
+      #, 200
+    if top > 0
+      Tracker.autorun (computation) ->
+        if Router.current().ready()
+          scroll()
+          computation.stop()
+    else
+      scroll()
+  , 0

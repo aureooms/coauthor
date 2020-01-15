@@ -1,3 +1,5 @@
+import { resolveTheme } from './theme.coffee'
+
 sharejsEditor = 'cm'  ## 'ace' or 'cm'; also change template used in message.jade
 
 switch sharejsEditor
@@ -36,6 +38,7 @@ switch sharejsEditor
 @dropdownToggle = (e) ->
   #$(e.target).parent().dropdown 'toggle'
   $(e.target).parents('.dropdown-menu').first().parent().find('.dropdown-toggle').dropdown 'toggle'
+  $(e.target).tooltip 'hide'
 
 @routeMessage = ->
   Router.current()?.params?.message
@@ -86,7 +89,9 @@ Template.registerHelper 'linkToTag', ->
     search: "tag:#{@key}"
 
 Template.registerHelper 'folded', ->
-  (not here @_id) and messageFolded.get @_id
+  (messageFolded.get @_id) and
+  (not here @_id) and                       # never fold if top-level message
+  (not Template.instance()?.editing?.get()) # never fold if editing
 
 Template.rootHeader.helpers
   root: ->
@@ -110,6 +115,15 @@ Template.registerHelper 'formatBody', ->
 
 Template.registerHelper 'formatFile', ->
   formatFile @
+
+Template.messageMaybe.helpers
+  matchingGroup: ->
+    @group == routeGroup()
+
+Template.messageMaybe.onRendered ->
+  ## Redirect wild-group message link to group-specific link
+  if routeGroup() == wildGroup
+    Router.go 'message', {group: @group, message: @_id}
 
 Template.messageBad.helpers
   message: -> Router.current().params.message
@@ -241,6 +255,7 @@ messageRaw = new ReactiveDict
 export messageFolded = new ReactiveDict
 defaultFolded = new ReactiveDict
 messageHistory = new ReactiveDict
+messageHistoryAll = new ReactiveDict
 messageKeyboard = new ReactiveDict
 messagePreview = new ReactiveDict
 defaultHeight = 300
@@ -279,6 +294,8 @@ export messageFoldHandler = (e, t) ->
   e.preventDefault()
   e.stopPropagation()
   messageFolded.set @_id, not messageFolded.get @_id
+  $(e.currentTarget).tooltip 'hide'
+  tooltipUpdate()
 
 threadAuthors = {}
 threadMentions = {}
@@ -542,12 +559,16 @@ Template.submessage.onRendered ->
   if scrollToLater == @data._id
     scrollToMessage @data._id
 
-  ## Image rotation
+  ## Image rotation. Also triggered in formatBody.
   @autorun =>
-    data = Template.currentData()
-    messageImageTransform.call @
+    data = Template.currentData()  ## update whenever message does
+    messageFolded.get data._id     ## update when message is unfolded
+    messageRaw.get data._id        ## update when raw mode turned off
+    messageRotate data             ## update when file orientation gets loaded
+    #console.log 'rotating', data._id, data.body, messageRotate data
+    Meteor.defer => messageImageTransform.call @
   window.addEventListener 'resize',
-    _.debounce (=> messageImageTransform.call @), 100
+    @onResize = _.debounce (=> messageImageTransform.call @), 100
 
   ## Update side-by-side height settings when leaving editing mode
   ## and/or changing side-by-side preview setting.
@@ -560,6 +581,9 @@ Template.submessage.onRendered ->
         preview.height
       else
         'auto'
+
+Template.submessage.onDestroyed ->
+  window.removeEventListener 'resize', @onResize if @onResize?
 
 ## Cache EXIF orientations, as files should be static
 image2orientation = {}
@@ -588,8 +612,11 @@ image2orientation = {}
   data = messageHistory.get(@data._id) ? @data
   if data.file and 'image' == fileType data.file
     image = @find '.message-file img'
-    return unless image?
-    imageTransform image, messageRotate data
+    if image?
+      imageTransform image, messageRotate data
+    else
+      ## This case occurs e.g. when switching to Raw mode.
+      @find('.message-file')?.style.height = null
 
 scrollDelay = 750
 
@@ -702,14 +729,15 @@ Template.submessage.helpers
             'CodeMirror-linenumbers'
             'CodeMirror-foldgutter'
           ]
+          theme = resolveTheme themeEditor()
           editor.setOption 'theme',
-            switch themeEditor()
+            switch theme
               when 'dark'
                 'blackboard'
               when 'light'
                 'eclipse'
               else
-                themeEditor()
+                theme
           pasteHTML = false
           editor.setOption 'extraKeys',
             Enter: 'xnewlineAndIndentContinueMarkdownList'
@@ -745,7 +773,7 @@ Template.submessage.helpers
                 else
                   replacement = "coauthor:#{id}"
             else if match = parseCoauthorMessageUrl text
-              replacement = "coauthor:#{match.message}"
+              replacement = "coauthor:#{match.message}#{match.hash}"
             else if match = parseCoauthorAuthorUrl text
               replacement = "@#{match.author}"
             else
@@ -796,7 +824,7 @@ Template.submessage.helpers
             else if 'text/plain' in e.clipboardData.types
               text = e.clipboardData.getData 'text/plain'
               if match = parseCoauthorMessageUrl text
-                paste = ["coauthor:#{match.message}"]
+                paste = ["coauthor:#{match.message}#{match.hash}"]
               else if match = parseCoauthorAuthorUrl text
                 paste = ["@#{match.author}"]
           editor.on 'beforeChange', (cm, change) ->
@@ -895,7 +923,7 @@ Template.submessage.helpers
     #console.log 'rendering', @_id
     history = messageHistory.get(@_id) ? @
     body = history.body
-    ## Apply image settings (e.g. rotation) on embedded images and image files
+    ## Apply image settings (e.g. rotation) on embedded images and image files.
     t = Template.instance()
     Meteor.defer -> messageImageTransform.call t
     return body unless body
@@ -935,11 +963,10 @@ Template.submessage.helpers
   canUnminimize: -> canUnminimize @_id
   canSuperdelete: -> canSuperdelete @_id
   canPrivate: -> canPrivate @_id
+  canParent: -> canMaybeParent @_id
 
   history: -> messageHistory.get(@_id)?
-  forHistory: ->
-    _id: @_id
-    history: messageHistory.get @_id
+  historyAll: -> messageHistoryAll.get @_id
 
   raw: -> messageRaw.get @_id
 
@@ -1032,10 +1059,12 @@ Template.registerHelper 'formatCreator', ->
 Template.registerHelper 'creator', ->
   displayUser @creator
 
-Template.registerHelper 'formatAuthors', ->
+Template.registerHelper 'formatAuthors', formatAuthors = ->
   tooltipUpdate()
-  a = for own author, date of @authors when author != @creator or date.getTime() != @created.getTime()
-        "#{linkToAuthor @group, unescapeUser author} #{formatDate date, 'on '}"
+  a = for own author, date of @authors
+        author = unescapeUser author
+        continue if author == @creator and date.getTime() == @created?.getTime()
+        "#{linkToAuthor @group, author} #{formatDate date, 'on '}"
   if a.length > 0
     ', edited by ' + a.join ", "
 
@@ -1105,6 +1134,7 @@ Template.submessage.events
     false  ## prevent form from submitting
 
   'click .foldButton': messageFoldHandler
+  'click .focusButton': (e) -> $(e.currentTarget).tooltip 'hide'
 
   'click .rawButton': (e, t) ->
     e.preventDefault()
@@ -1150,6 +1180,7 @@ Template.submessage.events
     #  Meteor.call 'messageEditStop', message
     Meteor.call 'messageUpdate', message,
       published: not @published
+      finished: true
     dropdownToggle e
 
   'click .deleteButton': (e, t) ->
@@ -1162,6 +1193,7 @@ Template.submessage.events
       Meteor.call 'messageEditStop', message
     Meteor.call 'messageUpdate', message,
       deleted: not @deleted
+      finished: true
     dropdownToggle e
 
   'click .privateButton': (e, t) ->
@@ -1170,6 +1202,7 @@ Template.submessage.events
     message = t.data._id
     Meteor.call 'messageUpdate', message,
       private: not @private
+      finished: true
     dropdownToggle e
 
   'click .minimizeButton': (e, t) ->
@@ -1179,7 +1212,19 @@ Template.submessage.events
     messageFolded.set message, @deleted or not @minimized or images[@_id]?.count > 0
     Meteor.call 'messageUpdate', message,
       minimized: not @minimized
+      finished: true
     dropdownToggle e
+
+  'click .parentButton': (e, t) ->
+    e.preventDefault()
+    e.stopPropagation()
+    child = t.data
+    oldParent = findMessageParent child
+    oldIndex = oldParent?.children.indexOf child._id
+    Modal.show 'messageParentDialog',
+      child: child
+      oldParent: oldParent
+      oldIndex: oldIndex
 
   'click .editorKeyboard': (e, t) ->
     e.preventDefault()
@@ -1238,6 +1283,11 @@ Template.submessage.events
     else
       messageHistory.set @_id, _.clone @
 
+  'click .historyAllButton': (e, t) ->
+    e.preventDefault()
+    e.stopPropagation()
+    messageHistoryAll.set @_id, not messageHistoryAll.get @_id
+
   'click .superdeleteButton': (e) ->
     e.preventDefault()
     e.stopPropagation()
@@ -1295,28 +1345,62 @@ Template.messageHistory.onCreated ->
 Template.messageHistory.onRendered ->
   `import('bootstrap-slider')`.then (Slider) =>
     Slider = Slider.default
+    diffs = []
     @autorun =>
-      @slider?.destroy()
+      previous = messageHistory.get(@data._id)?.diffId
+      if @slider?
+        @slider.destroy()
+        @slider = null
+        ## Rehide slider's <input> in case we don't make one in this round.
+        @find('input').style.display = 'none'
       diffs = MessagesDiff.find
-          id: @data._id
-        ,
-          sort: ['updated']
-        .fetch()
-      return if diffs.length < 2  ## don't show a zero-length slider
+        id: @data._id
+      ,
+        sort: ['updated']
+      .fetch()
       ## Accumulate diffs
       for diff, i in diffs
-        if i >= 0
-          for own key, value of diffs[i-1]
+        diff.diffId = diff._id
+        diff._id = @data._id
+        if i == 0  # first diff
+          diff.creator = @data.creator
+          diff.created = @data.created
+          diff.authors = {}
+        else  # later diff
+          diff.authors = _.extend {}, diffs[i-1].authors  # avoid aliasing
+          for own key, value of diffs[i-1] when key != 'finished'
             unless key of diff
               diff[key] = value
-        ## Remove diff IDs
-        delete diff._id
-      @slider = new Slider @$('input')[0],
+        for author in diff.updators ? []
+          diff.authors[escapeUser author] = diff.updated
+      ## Restrict to finished diffs if requested, preserving last chosen diff
+      index = -1
+      unless messageHistoryAll.get @data._id
+        finished = []
+        for diff, i in diffs
+          if diff.diffId == previous
+            index = finished.length
+          if diff.finished or i == diffs.length - 1
+            finished.push diff
+        diffs = finished
+      else
+        for diff, i in diffs
+          if diff.diffId == previous
+            index = i
+            break
+      unless 0 <= index < diffs.length
+        index = diffs.length - 1
+      previous = diffs[index]?.diffId
+      ## Don't show a zero-length slider
+      return unless diffs.length
+      ## Draw slider
+      @slider = new Slider @find('input'),
         #min: 0                 ## min and max not needed when using ticks
         #max: diffs.length-1
         #value: diffs.length-1  ## doesn't update, unlike setValue method below
         ticks: [0...diffs.length]
         ticks_snap_bounds: 999999999
+        reversed: diffs.length == 1  ## put one tick at far right
         tooltip: 'always'
         tooltip_position: 'bottom'
         formatter: (i) ->
@@ -1324,11 +1408,11 @@ Template.messageHistory.onRendered ->
             formatDate(diffs[i].updated) + '\n' + diffs[i].updators.join ', '
           else
             i
-      @slider.setValue diffs.length-1
+      @slider.setValue index
       #@slider.off 'change'
       @slider.on 'change', (e) =>
         messageHistory.set @data._id, diffs[e.newValue]
-      messageHistory.set @data._id, diffs[diffs.length-1]
+      messageHistory.set @data._id, diffs[index]
 
 uploader = (template, button, input, callback) ->
   Template[template].events {
@@ -1364,6 +1448,7 @@ attachFiles = (files, e, t) ->
         callbacks[i] = ->
           Meteor.call 'messageNew', group, message, null,
             file: file2.uniqueIdentifier
+            finished: true
           , done
         ## But call all the callbacks in order by file, so that replies
         ## appear in the correct order.
@@ -1385,6 +1470,7 @@ replaceFiles = (files, e, t) ->
     file.callback = (file2, done) ->
       diff =
         file: file2.uniqueIdentifier
+        finished: true
       ## Reset rotation angle on replace
       data = findMessage message
       if data.rotate
@@ -1396,8 +1482,8 @@ replaceFiles = (files, e, t) ->
 uploader 'messageReplace', 'replaceButton', 'replaceInput', replaceFiles
 
 Template.messageAuthor.helpers
-  creator: ->
-    "!" + @creator
+  formatAuthors: ->
+    formatAuthors.call messageHistory.get(@_id) ? @
 
 privacyOptions = [
   code: 'public'
@@ -1499,20 +1585,21 @@ dropOn = (e, t) ->
   e.preventDefault()
   e.stopPropagation()
   $(e.target).removeClass 'dragover'
-  dragId = e.originalEvent.dataTransfer?.getData 'application/coauthor-id'
-  dropId = e.target.getAttribute 'data-id'
-  if dragId and dropId
-    messageParent dragId, dropId
-
-dropBefore = (e, t) ->
-  e.preventDefault()
-  e.stopPropagation()
-  $(e.target).removeClass 'dragover'
-  dragId = e.originalEvent.dataTransfer?.getData 'application/coauthor-id'
-  dropId = e.target.getAttribute 'data-parent'
-  index = e.target.getAttribute 'data-index'
-  if dragId and dropId and index
+  dragId = e.originalEvent.dataTransfer?.getData('application/coauthor-id')
+  unless dragId
+    url = e.originalEvent.dataTransfer?.getData 'text/plain'
+    if url?
+      url = parseCoauthorMessageUrl url
+      if url?.hash
+        dragId = url.hash[1..]
+      else
+        dragId = url?.message
+  if index = e.target.getAttribute 'data-index'
     index = parseInt index
+    dropId = e.target.getAttribute 'data-parent'
+  else
+    dropId = e.target.getAttribute 'data-id'
+  if dragId and dropId
     messageParent dragId, dropId, index
 
 for template in [Template.tableOfContentsRoot, Template.tableOfContentsMessage]
@@ -1524,14 +1611,12 @@ for template in [Template.tableOfContentsRoot, Template.tableOfContentsMessage]
     "dragleave .beforeMessageDrop": removeDragOver
     "dragover .beforeMessageDrop": dragOver
     "drop .onMessageDrop": dropOn
-    "drop .beforeMessageDrop": dropBefore
+    "drop .beforeMessageDrop": dropOn
 
 messageParent = (child, parent, index = null) ->
-  #console.log 'messageParent', child, parent, index
-  #Meteor.call 'messageParent', child, parent, index
   return if child == parent  ## ignore trivial self-loop
-  childMsg = Messages.findOne child
-  parentMsg = Messages.findOne parent
+  childMsg = findMessage(child) ? _id: child
+  parentMsg = findMessage(parent) ? _id: parent
   oldParent = findMessageParent child
   oldIndex = oldParent?.children.indexOf child
   if parentMsg?._id == oldParent?._id
@@ -1543,20 +1628,116 @@ messageParent = (child, parent, index = null) ->
     if index? and index > oldIndex
       index -= 1
       return if index == oldIndex
-  Modal.show 'messageParentConfirm',
+  Modal.show 'messageParentDialog',
     child: childMsg
     parent: parentMsg
     oldParent: oldParent
     index: index
     oldIndex: oldIndex
 
-Template.messageParentConfirm.events
+Template.messageParentDialog.onCreated ->
+  unless @data.oldParent?
+    if @data.child.group?
+      @data.oldParent =
+        isGroup: true
+        group: @data.child.group
+    else
+      @data.oldParent =
+        _id: null  # triggers unloaded view
+  @parent = new ReactiveVar @data.parent
+  #@index = new ReactiveVar @data.index
+
+Template.messageParentDialog.helpers
+  parent: -> Template.instance().parent.get()
+
+Template.messageParentDialog.onRendered ->
+  @autorun =>
+    @messages = Messages.find {},
+      fields:
+        _id: true
+        group: true
+        title: true
+        file: true
+        creator: true
+        children: true
+    .fetch()
+    byId = {}
+    for msg in @messages
+      byId[msg._id] = msg
+    ## Remove descendants similar to descendantMessageIds, but using fetched.
+    recurse = (id) ->
+      msg = byId[id]
+      return unless msg?
+      delete byId[id]
+      for child in msg.children
+        recurse child
+    recurse @data.child._id
+    ## Show (messages from) other groups if superuser for this group
+    acrossGroups = canSuper @data.child.group
+    @messages =
+      for msg in @messages when msg._id of byId and (
+          acrossGroups or msg.group == @data.child.group)
+        msg.text = "#{titleOrUntitled msg} by #{msg.creator} [#{msg._id}]"
+        msg.html = "#{_.escape titleOrUntitled msg} <span class=\"author\"><i>by</i> #{_.escape msg.creator}</span> <span class=\"id\">[#{_.escape msg._id}]</span>"
+        msg
+    @messages.push
+      text: "Group: #{@data.child.group}"
+      html: "<i>Group</i>: #{@data.child.group}"
+    if acrossGroups
+      Groups.find
+        name: $ne: @data.child.group
+      , fields: name: true
+      .forEach (group) =>
+        @messages.push
+          text: "Group: #{group.name}"
+          html: "<i>Group</i>: #{group.name}"
+      
+  @$('.typeahead').typeahead
+    hint: true
+    highlight: true
+    minLength: 1
+  ,
+    name: 'parent'
+    limit: 50
+    source: (q, callback) =>
+      re = new RegExp (escapeRegExp q), 'i'
+      callback(msg for msg in @messages when msg.text.match re)
+    display: (msg) -> msg.text
+    templates:
+      suggestion: (msg) -> "<div>#{msg.html}</div>"
+      notFound: '<i style="margin: 0ex 1em">No matching messages found.</i>'
+
+Template.messageParentDialog.events
+  "typeahead:autocomplete .parent, typeahead:cursorchange .parent, typeahead:select .parent, input .parent": (e, t) ->
+    text = t.find('.tt-input').value
+    if match = ///(?:^\s*|[\[/:])(#{idRegex})\]?\s*$///.exec text
+      msg = findMessage(match[1]) ? {_id: match[1]}  # allow unknown message ID
+      if e.type == 'input' and t.parent.get()?._id != match[1] and
+         msg.creator?  # hand-typed new good message ID
+        t.$('.typeahead').typeahead 'close'
+      t.parent.set msg
+    else if match = /^\s*Group:\s*(.*?)\s*$/i.exec text
+      t.parent.set
+        isGroup: true
+        group: match[1]
+
   "click .messageParentButton": (e, t) ->
     e.preventDefault()
     e.stopPropagation()
     Modal.hide()
-    Meteor.call 'messageParent', t.data.child._id, t.data.parent._id, t.data.index
+    parent = t.parent.get()
+    if t.data.index? and t.data.parent == parent # unchanged from drag
+      console.assert not parent.isGroup
+      Meteor.call 'messageParent', t.data.child._id, t.data.parent._id, t.data.index
+    else if parent.isGroup
+      Meteor.call 'messageParent', t.data.child._id, null, parent.group
+    else
+      Meteor.call 'messageParent', t.data.child._id, parent._id
+
   "click .cancelButton": (e) ->
     e.preventDefault()
     e.stopPropagation()
     Modal.hide()
+
+Template.groupOrMessage.helpers
+  loadedMessage: -> @creator?
