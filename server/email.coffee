@@ -7,7 +7,7 @@ unless process.env['MAIL_URL']?
 Accounts.emailTemplates.from = process.env['MAIL_FROM'] ?
   "coauthor@#{require('url').parse(process.env['ROOT_URL']).hostname}"
 Accounts.emailTemplates.siteName = 'Coauthor'
-Accounts.emailTemplates.from = 'coauthor@ulb.ac.be'
+Accounts.emailTemplates.from = 'notifications@coauthor.xn--mxac.cc'
 Accounts.emailTemplates.verifyEmail.subject = (user) ->
   "Email confirmation for Coauthor"
 Accounts.emailTemplates.verifyEmail.text = (user, link) -> """

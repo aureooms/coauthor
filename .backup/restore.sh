@@ -2,15 +2,15 @@
 
 set -o xtrace
 
-SERVER='meteorapp@coauthor.ulb.ac.be'
-IDENTITY="$HOME/.ssh/coauthor-meteorapp"
+SERVER='meteorapp@coauthor.xn--mxac.cc'
+IDENTITY="$HOME/.ssh/meteorapp@coauthor.xn--mxac.cc"
 
 function onserver {
-  ssh -i "$IDENTITY" "$SERVER" "$@"
+  ssh -p 30 -i "$IDENTITY" "$SERVER" "$@"
 }
 
 function load {
-  rsync -e "ssh -i $IDENTITY" -a "$@"
+  rsync -e "ssh -p 30 -i $IDENTITY" -a "$@"
 }
 
 cd "$(dirname "$0")"

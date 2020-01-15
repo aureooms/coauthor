@@ -2,9 +2,9 @@
 
 set -o xtrace
 
-SERVER='meteorapp@coauthor.ulb.ac.be'
+SERVER='meteorapp@coauthor.xn--mxac.cc'
 CLOUD='db' # dropbox
-IDENTITY="$HOME/.ssh/coauthor-meteorapp"
+IDENTITY="$HOME/.ssh/meteorapp@coauthor.xn--mxac.cc"
 
 function onserver {
   ssh -i "$IDENTITY" "$SERVER" "$@"

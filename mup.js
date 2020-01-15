@@ -1,8 +1,11 @@
 module.exports = {
   servers: {
     one: {
-      host: 'coauthor.ulb.ac.be',
-      username: 'meteorapp'
+      host: 'coauthor.xn--mxac.cc',
+      username: 'meteorapp',
+      opts: {
+        port: 30
+      }
     }
   },
 
@@ -19,9 +22,9 @@ module.exports = {
       serverOnly: true
     },
     env: {
-      ROOT_URL: 'https://coauthor.ulb.ac.be',
+      ROOT_URL: 'https://coauthor.xn--mxac.cc',
       PORT: 3001,
-      MAIL_URL: 'smtp://smtp.ulb.ac.be:25?ignoreTLS=true'
+      MAIL_URL: false
     },
     deployCheckWaitTime: 30,
     deployCheckPort: 80,
